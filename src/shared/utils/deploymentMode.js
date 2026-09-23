@@ -32,9 +32,13 @@ export function isLoopbackUrl(url) {
 
 /** Browser: public https origin that is not loopback. */
 export function isHostedBrowser() {
-  if (typeof window === "undefined") return false;
-  if (window.location.protocol !== "https:") return false;
-  return !isLoopbackHostname(window.location.hostname);
+  if (typeof window === "undefined" || !window?.location) return false;
+  try {
+    if (window.location.protocol !== "https:") return false;
+    return !isLoopbackHostname(window.location.hostname);
+  } catch {
+    return false;
+  }
 }
 
 /**

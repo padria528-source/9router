@@ -27,12 +27,18 @@ import ModelAvailabilityBadge from "./components/ModelAvailabilityBadge";
 import AddCompatibleModal from "./components/AddCompatibleModal";
 import { STATUS_FILTER_OPTIONS, matchesStatusFilter } from "./utils";
 
-function getStatusDisplay(connected, error, errorCode) {
+function getStatusDisplay(connected, error, errorCode, providerId) {
   const parts = [];
   if (connected > 0) {
+    const label =
+      providerId === "openai"
+        ? "OpenAI API — Connected"
+        : providerId === "codex"
+          ? "Codex — Connected"
+          : `${connected} Connected`;
     parts.push(
       <Badge key="connected" variant="success" size="sm" dot>
-        {connected} Connected
+        {label}
       </Badge>,
     );
   }
@@ -751,7 +757,7 @@ function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
                   <Badge variant="success" size="sm" dot>Ready</Badge>
                 ) : (
                   <>
-                    {getStatusDisplay(connected, error, errorCode)}
+                    {getStatusDisplay(connected, error, errorCode, providerId)}
                     {errorTime && (
                       <span className="text-text-muted">{errorTime}</span>
                     )}
@@ -877,7 +883,7 @@ function ApiKeyProviderCard({
                   </Badge>
                 ) : (
                   <>
-                    {getStatusDisplay(connected, error, errorCode)}
+                    {getStatusDisplay(connected, error, errorCode, providerId)}
                     {isCompatible && (
                       <Badge variant="default" size="sm">
                         {provider.apiType === "responses"

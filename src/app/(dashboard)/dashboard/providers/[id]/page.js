@@ -14,6 +14,7 @@ import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
+import { isHostedBrowser } from "@/shared/utils/deploymentMode";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -1400,6 +1401,16 @@ export default function ProviderDetailPage() {
           <div className="min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-3xl">{providerInfo.name}</h1>
+              {providerId === "openai" && connections.some((c) => c.isActive !== false) && (
+                <Badge variant="success" size="sm" dot>
+                  OpenAI API — Connected
+                </Badge>
+              )}
+              {providerId === "codex" && connections.some((c) => c.isActive !== false) && (
+                <Badge variant="success" size="sm" dot>
+                  Codex — Connected
+                </Badge>
+              )}
               {(providerInfo.notice?.apiKeyUrl || providerInfo.notice?.signupUrl || providerInfo.website) && (
                 <a
                   href={providerInfo.notice?.apiKeyUrl || providerInfo.notice?.signupUrl || providerInfo.website}
@@ -1723,6 +1734,27 @@ export default function ProviderDetailPage() {
                         {apiKeyConnectionLabel}
                       </Button>
                     </>
+                  ) : providerId === "codex" && isHostedBrowser() ? (
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                      <Button
+                        size="sm"
+                        icon="key"
+                        onClick={triggerAddConnection}
+                        className="w-full sm:w-auto"
+                      >
+                        Import Access Token
+                      </Button>
+                      <Link href="/dashboard/providers/openai">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon="open_in_new"
+                          className="w-full sm:w-auto"
+                        >
+                          Use OpenAI API Key
+                        </Button>
+                      </Link>
+                    </div>
                   ) : (
                     <Button
                       size="sm"

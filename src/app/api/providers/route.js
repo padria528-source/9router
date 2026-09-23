@@ -76,6 +76,21 @@ export async function GET() {
       };
     });
 
+    // Include safe representation of environment-configured OpenAI API connection if present
+    const hasOpenAiDbConn = connections.some(c => c.provider === "openai" && c.isActive !== false);
+    if (!hasOpenAiDbConn && process.env.OPENAI_API_KEY?.trim()) {
+      safeConnections.push({
+        id: "env-openai-key",
+        provider: "openai",
+        name: "OpenAI API (Environment)",
+        authType: "apikey",
+        isActive: true,
+        testStatus: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
     return NextResponse.json({ connections: safeConnections });
   } catch (error) {
     console.log("Error fetching providers:", error);

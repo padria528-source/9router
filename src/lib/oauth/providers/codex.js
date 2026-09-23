@@ -7,10 +7,17 @@ const codex = {
   fixedPort: CODEX_CONFIG.fixedPort,
   callbackPath: CODEX_CONFIG.callbackPath,
   buildAuthUrl: (config, redirectUri, state, codeChallenge) => {
+    // Codex OAuth client strictly whitelists http://localhost:1455/auth/callback.
+    // Never generate an authorize URL with a custom or remote redirect URI.
+    const safeRedirectUri =
+      redirectUri && (redirectUri.startsWith("http://localhost:") || redirectUri.startsWith("http://127.0.0.1:"))
+        ? redirectUri
+        : "http://localhost:1455/auth/callback";
+
     const params = {
       response_type: "code",
       client_id: config.clientId,
-      redirect_uri: redirectUri,
+      redirect_uri: safeRedirectUri,
       scope: config.scope,
       code_challenge: codeChallenge,
       code_challenge_method: config.codeChallengeMethod,

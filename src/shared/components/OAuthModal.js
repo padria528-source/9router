@@ -12,6 +12,14 @@ const PROXY_OAUTH_PROVIDERS = new Set(["trae", "windsurf", "zed"]);
 // Providers offering a paste-token fallback (import-token flow).
 // UX warns if the IDE (which issues the token) is not installed.
 const PASTE_TOKEN_PROVIDERS = {
+  codex: {
+    label: "ChatGPT Access Token / Auth JSON",
+    instructions:
+      "Paste your ChatGPT access token (starts with eyJ) or auth JSON from ~/.codex/auth.json. For hosted Railway instances, configuring OPENAI_API_KEY in environment variables is recommended.",
+    placeholder: "Paste access token or auth JSON here...",
+    ideName: "Codex CLI",
+    ideOptional: true,
+  },
   trae: {
     label: "Cloud-IDE-JWT",
     instructions:
@@ -47,7 +55,26 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   const [authMode, setAuthMode] = useState("browser"); // "browser" | "paste-token"
   const [pasteToken, setPasteToken] = useState("");
   const [ideStatus, setIdeStatus] = useState(null);
+  const [autoImporting, setAutoImporting] = useState(false);
   const popupRef = useRef(null);
+
+  const handleCodexAutoImport = async () => {
+    setAutoImporting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/oauth/codex/auto-import", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to auto-import Codex credentials");
+      }
+      setStep("success");
+      onSuccessRef.current?.();
+    } catch (err) {
+      setError(err.message || "Failed to auto-import Codex credentials");
+    } finally {
+      setAutoImporting(false);
+    }
+  };
   const pollingAbortRef = useRef(false);
   const openedRef = useRef(false);
   // Proxy-flow session ledger: which provider's proxy THIS modal session
@@ -350,6 +377,16 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
 
       // Authorization code flow - build redirect URI (some providers require fixed ports)
       const appPort = window.location.port || (window.location.protocol === "https:" ? "443" : "80");
+
+      if (provider === "codex" && isHostedBrowser()) {
+        setAuthMode("paste-token");
+        setStep("input");
+        setError(
+          "Codex browser OAuth requires local loopback (http://localhost:1455). On hosted Railway instances, paste your ChatGPT access token or configure OPENAI_API_KEY in your server environment."
+        );
+        return;
+      }
+
       let redirectUri;
       if (provider === "codex") {
         redirectUri = "http://localhost:1455/auth/callback";
@@ -489,6 +526,16 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
     setIdeStatus(null);
     pollingAbortRef.current = false;
     flowRef.current = { proxyStarted: false, proxyProvider: null, stopSent: false };
+
+    if (provider === "codex" && isHostedBrowser()) {
+      setAuthMode("paste-token");
+      setStep("input");
+      setError(
+        "Codex browser OAuth requires local loopback (http://localhost:1455). On hosted Railway instances, paste your ChatGPT access token or configure OPENAI_API_KEY in your server environment."
+      );
+      return;
+    }
+
     // Best-effort IDE detection for paste-token providers (Trae/Windsurf)
     if (PASTE_TOKEN_PROVIDERS[provider]) {
       fetch(`/api/oauth/${provider}/ide-status`)
@@ -753,17 +800,19 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   return (
     <Modal isOpen={isOpen} title={modalTitle} onClose={handleClose} size="lg">
       <div className="flex flex-col gap-4">
-        {/* Trae/Windsurf: browser OAuth (proxy) + paste-token fallback */}
-        {PROXY_OAUTH_PROVIDERS.has(provider) && (step === "waiting" || step === "input" || step === "error") && (
+        {/* Trae/Windsurf/Codex: browser OAuth (proxy) + paste-token fallback */}
+        {(PROXY_OAUTH_PROVIDERS.has(provider) || Boolean(PASTE_TOKEN_PROVIDERS[provider])) && (step === "waiting" || step === "input" || step === "error") && (
           <>
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => { setAuthMode("browser"); setError(null); setStep("waiting"); startOAuthFlow(); }}
-                className={`flex-1 rounded-lg border px-3 py-2 text-sm transition-colors ${authMode === "browser" ? "border-primary bg-primary/10 text-primary" : "border-border text-text-muted hover:text-primary"}`}
-              >
-                🌐 Sign in with browser
-              </button>
+              {!(provider === "codex" && isHostedBrowser()) && (
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode("browser"); setError(null); setStep("waiting"); startOAuthFlow(); }}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-sm transition-colors ${authMode === "browser" ? "border-primary bg-primary/10 text-primary" : "border-border text-text-muted hover:text-primary"}`}
+                >
+                  🌐 Sign in with browser
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => { setAuthMode("paste-token"); setError(null); setStep("input"); }}
@@ -822,13 +871,27 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
                   <Button onClick={handleManualSubmit} fullWidth disabled={!pasteToken}>Connect</Button>
                   <Button onClick={handleClose} variant="ghost" fullWidth>Cancel</Button>
                 </div>
+
+                {provider === "codex" && !isHostedBrowser() && (
+                  <div className="pt-2 border-t border-border">
+                    <Button
+                      onClick={handleCodexAutoImport}
+                      loading={autoImporting}
+                      variant="secondary"
+                      fullWidth
+                      icon="sync"
+                    >
+                      Auto-import from ~/.codex/auth.json
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </>
         )}
 
-        {/* Waiting + Manual Input combined (non-device-code, non-proxy) */}
-        {(step === "waiting" || step === "input") && !isDeviceCode && !PROXY_OAUTH_PROVIDERS.has(provider) && (
+        {/* Waiting + Manual Input combined (non-device-code, non-proxy, non-paste-token) */}
+        {(step === "waiting" || step === "input") && !isDeviceCode && !PROXY_OAUTH_PROVIDERS.has(provider) && !PASTE_TOKEN_PROVIDERS[provider] && (
           <>
             {/* Option A: Auto via popup */}
             <div className="flex items-center gap-2 px-3 py-2 border border-border rounded-lg bg-sidebar/50">

@@ -1,5 +1,6 @@
 import https from "https";
 import pkg from "../../../../package.json" with { type: "json" };
+import { isHosted } from "@/shared/utils/deploymentMode";
 
 const NPM_PACKAGE_NAME = "9router";
 const VERSION_CACHE_TTL_MS = 3600000; // cache npm latest lookup for 1h
@@ -57,5 +58,23 @@ export async function GET() {
   const currentVersion = pkg.version;
   const hasUpdate = latestVersion ? compareVersions(latestVersion, currentVersion) > 0 : false;
 
-  return Response.json({ currentVersion, latestVersion, hasUpdate });
+  const commit =
+    process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ||
+    process.env.GIT_COMMIT?.slice(0, 7) ||
+    process.env.NEXT_PUBLIC_GIT_COMMIT ||
+    "dev";
+
+  const openaiAuthMethod =
+    process.env.OPENAI_AUTH_METHOD ||
+    (process.env.OPENAI_API_KEY ? "api_key" : "codex_session");
+
+  return Response.json({
+    currentVersion,
+    latestVersion,
+    hasUpdate,
+    commit,
+    buildTime: process.env.BUILD_TIME || null,
+    deploymentMode: isHosted() ? "hosted" : "local",
+    openaiAuthMethod
+  });
 }

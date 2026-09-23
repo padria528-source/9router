@@ -69,7 +69,21 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       };
     }
 
-    const connections = await getProviderConnections({ provider: providerId, isActive: true });
+    let connections = await getProviderConnections({ provider: providerId, isActive: true });
+
+    // Server/Railway mode: fallback to process.env.OPENAI_API_KEY when no DB connection is configured
+    if (connections.length === 0 && providerId === "openai" && process.env.OPENAI_API_KEY?.trim()) {
+      connections = [{
+        id: "env-openai-key",
+        provider: "openai",
+        displayName: "OpenAI API (Environment)",
+        name: "OpenAI API (Environment)",
+        authType: "apikey",
+        apiKey: process.env.OPENAI_API_KEY.trim(),
+        isActive: true,
+        testStatus: "active",
+      }];
+    }
     log.debug("AUTH", `${provider} | total connections: ${connections.length}, excludeIds: ${excludeSet.size > 0 ? [...excludeSet].join(",") : "none"}, model: ${model || "any"}`);
 
     if (connections.length === 0) {

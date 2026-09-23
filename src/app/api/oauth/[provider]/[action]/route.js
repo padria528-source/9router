@@ -122,7 +122,11 @@ export async function GET(request, { params }) {
         });
       }
 
-      const redirectUri = searchParams.get("redirect_uri") || "http://localhost:8080/callback";
+      let redirectUri = searchParams.get("redirect_uri") || "http://localhost:8080/callback";
+      if (provider === "codex") {
+        // OpenAI Codex client strictly whitelists http://localhost:1455/auth/callback
+        redirectUri = "http://localhost:1455/auth/callback";
+      }
       // Collect provider-specific meta params (e.g. gitlab passes baseUrl, clientId, clientSecret)
       const reservedParams = new Set(["redirect_uri"]);
       const meta = {};
@@ -409,6 +413,50 @@ export async function POST(request, { params }) {
           });
         } catch (err) {
           return NextResponse.json({ error: err.message }, { status: 500 });
+        }
+      }
+
+      // Detect if "code" is a pasted JSON object (e.g. from ~/.codex/auth.json or session export)
+      if (typeof code === "string" && code.trim().startsWith("{") && provider === "codex") {
+        try {
+          const parsed = JSON.parse(code.trim());
+          const tokenObj = parsed.tokens || parsed;
+          const rawToken = tokenObj.access_token || tokenObj.accessToken;
+          if (rawToken) {
+            const { extractCodexAccountInfo } = await import("@/lib/oauth/providers");
+            const info = extractCodexAccountInfo(tokenObj.id_token || tokenObj.idToken || rawToken);
+            const email = info.email || parsed.email || null;
+            const refreshToken = tokenObj.refresh_token || tokenObj.refreshToken || null;
+            const accountId = tokenObj.account_id || info.chatgptAccountId;
+            const planType = info.chatgptPlanType;
+
+            const providerSpecificData = { authMethod: refreshToken ? "oauth" : "access_token" };
+            if (accountId) providerSpecificData.chatgptAccountId = accountId;
+            if (planType) providerSpecificData.chatgptPlanType = planType;
+
+            const connection = await createProviderConnection({
+              provider: "codex",
+              authType: refreshToken ? "oauth" : "access_token",
+              accessToken: rawToken,
+              refreshToken,
+              idToken: tokenObj.id_token || tokenObj.idToken || null,
+              email,
+              providerSpecificData,
+              testStatus: "active",
+            });
+
+            return NextResponse.json({
+              success: true,
+              connection: {
+                id: connection.id,
+                provider: connection.provider,
+                email: connection.email,
+                displayName: connection.displayName,
+              },
+            });
+          }
+        } catch {
+          // not valid json, fall through
         }
       }
 

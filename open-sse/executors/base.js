@@ -97,6 +97,42 @@ export class BaseExecutor {
     return { status: response.status, message: bodyText || `HTTP ${response.status}` };
   }
 
+  async computeRetryDelay(response, attempt, defaultDelayMs) {
+    // 1. Check Retry-After header
+    const retryAfter = response?.headers?.get?.("retry-after");
+    if (retryAfter) {
+      let retryMs = null;
+      const seconds = parseFloat(retryAfter);
+      if (!isNaN(seconds) && seconds >= 0) {
+        retryMs = Math.round(seconds * 1000);
+      } else {
+        const dateMs = new Date(retryAfter).getTime();
+        if (!isNaN(dateMs)) {
+          const diff = dateMs - Date.now();
+          if (diff > 0) retryMs = diff;
+        }
+      }
+      if (retryMs !== null) {
+        const maxCap = this.config?.maxRetryAfterMs || 15000;
+        if (retryMs > maxCap) {
+          // Veto in-place retry when wait time is too long; caller falls back
+          return false;
+        }
+        return retryMs;
+      }
+    }
+
+    // 2. Exponential backoff with small jitter if defaultDelayMs > 0
+    if (defaultDelayMs > 0) {
+      const factor = Math.pow(1.5, Math.max(0, attempt - 1));
+      const jitter = Math.random() * 0.15 * defaultDelayMs;
+      const computed = Math.round(defaultDelayMs * factor + jitter);
+      return Math.min(computed, this.config?.maxRetryDelayMs || 10000);
+    }
+
+    return defaultDelayMs;
+  }
+
   async execute({ model, body, stream, credentials, signal, log, proxyOptions = null }) {
     const fallbackCount = this.getFallbackCount();
     let lastError = null;

@@ -323,7 +323,7 @@ export async function executeDebate({
   const lastUserMessage = extractText(messages[messages.length - 1]?.content);
 
   // Round 1: Independent Initial Positions
-  onEvent?.({ stage: "debate_round", round: 1, status: AGENT_STATUS.PROCESSING, timestamp: Date.now() });
+  onEvent?.({ stage: "debate_round", round: 1, model: `${debaterA} vs ${debaterB}`, status: AGENT_STATUS.PROCESSING, timestamp: Date.now() });
 
   const r1PromptA = [
     { role: "system", content: "You are Debater A in an AI debate. Formulate a strong, well-reasoned initial position defending your core arguments." },
@@ -358,7 +358,7 @@ export async function executeDebate({
   // Round 2: Critique & Rebuttal (if rounds === 2 and both or at least one produced output)
   if (maxRounds >= 2 && resA1.success && resB1.success) {
     executedRounds = 2;
-    onEvent?.({ stage: "debate_round", round: 2, status: AGENT_STATUS.PROCESSING, timestamp: Date.now() });
+    onEvent?.({ stage: "debate_round", round: 2, model: `${debaterA} vs ${debaterB}`, status: AGENT_STATUS.PROCESSING, timestamp: Date.now() });
 
     const posATruncated = truncateForContext(resA1.content);
     const posBTruncated = truncateForContext(resB1.content);

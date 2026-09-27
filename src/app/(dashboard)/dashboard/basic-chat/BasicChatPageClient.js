@@ -32,6 +32,25 @@ function safeParse(value, fallback) {
   }
 }
 
+function safeStorageGet(key, fallback = null) {
+  try {
+    if (typeof window === "undefined" || !globalThis.localStorage) return fallback;
+    return globalThis.localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeStorageSet(key, value) {
+  try {
+    if (typeof window !== "undefined" && globalThis.localStorage) {
+      globalThis.localStorage.setItem(key, value);
+    }
+  } catch {
+    // Ignore storage restriction errors
+  }
+}
+
 function textValue(value) {
   if (typeof value === "string") return value;
   if (value == null) return "";
@@ -207,33 +226,14 @@ export default function BasicChatPageClient() {
   const [isHydrated, setIsHydrated] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [appMode, setAppMode] = useState(() => {
-    if (typeof window === "undefined") return "tunggal";
-    return globalThis.localStorage?.getItem(STORAGE_KEYS.mode) || "tunggal";
-  });
-  const [councilMembers, setCouncilMembers] = useState(() => {
-    if (typeof window === "undefined") return [];
-    return safeParse(globalThis.localStorage?.getItem(STORAGE_KEYS.councilMembers), []);
-  });
-  const [councilReviewer, setCouncilReviewer] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return globalThis.localStorage?.getItem(STORAGE_KEYS.councilReviewer) || "";
-  });
-  const [debateA, setDebateA] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return globalThis.localStorage?.getItem(STORAGE_KEYS.debateA) || "";
-  });
-  const [debateB, setDebateB] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return globalThis.localStorage?.getItem(STORAGE_KEYS.debateB) || "";
-  });
-  const [debateJudge, setDebateJudge] = useState(() => {
-    if (typeof window === "undefined") return "";
-    return globalThis.localStorage?.getItem(STORAGE_KEYS.debateJudge) || "";
-  });
+  const [appMode, setAppMode] = useState(() => safeStorageGet(STORAGE_KEYS.mode, "tunggal"));
+  const [councilMembers, setCouncilMembers] = useState(() => safeParse(safeStorageGet(STORAGE_KEYS.councilMembers, "[]"), []));
+  const [councilReviewer, setCouncilReviewer] = useState(() => safeStorageGet(STORAGE_KEYS.councilReviewer, ""));
+  const [debateA, setDebateA] = useState(() => safeStorageGet(STORAGE_KEYS.debateA, ""));
+  const [debateB, setDebateB] = useState(() => safeStorageGet(STORAGE_KEYS.debateB, ""));
+  const [debateJudge, setDebateJudge] = useState(() => safeStorageGet(STORAGE_KEYS.debateJudge, ""));
   const [debateRounds, setDebateRounds] = useState(() => {
-    if (typeof window === "undefined") return 2;
-    const r = parseInt(globalThis.localStorage?.getItem(STORAGE_KEYS.debateRounds), 10);
+    const r = parseInt(safeStorageGet(STORAGE_KEYS.debateRounds, "2"), 10);
     return r === 1 ? 1 : 2;
   });
   const [councilMenuOpen, setCouncilMenuOpen] = useState(false);
@@ -385,54 +385,40 @@ export default function BasicChatPageClient() {
   const handleSelectMode = (newMode) => {
     setAppMode(newMode);
     setOrchestrationStatus([]);
-    if (typeof window !== "undefined") {
-      globalThis.localStorage?.setItem(STORAGE_KEYS.mode, newMode);
-    }
+    safeStorageSet(STORAGE_KEYS.mode, newMode);
   };
 
   const handleToggleCouncilMember = (modelId) => {
     setCouncilMembers((prev) => {
       const next = prev.includes(modelId) ? prev.filter((id) => id !== modelId) : [...prev, modelId];
-      if (typeof window !== "undefined") {
-        globalThis.localStorage?.setItem(STORAGE_KEYS.councilMembers, JSON.stringify(next));
-      }
+      safeStorageSet(STORAGE_KEYS.councilMembers, JSON.stringify(next));
       return next;
     });
   };
 
   const handleSetCouncilReviewer = (modelId) => {
     setCouncilReviewer(modelId);
-    if (typeof window !== "undefined") {
-      globalThis.localStorage?.setItem(STORAGE_KEYS.councilReviewer, modelId);
-    }
+    safeStorageSet(STORAGE_KEYS.councilReviewer, modelId);
   };
 
   const handleSetDebateA = (modelId) => {
     setDebateA(modelId);
-    if (typeof window !== "undefined") {
-      globalThis.localStorage?.setItem(STORAGE_KEYS.debateA, modelId);
-    }
+    safeStorageSet(STORAGE_KEYS.debateA, modelId);
   };
 
   const handleSetDebateB = (modelId) => {
     setDebateB(modelId);
-    if (typeof window !== "undefined") {
-      globalThis.localStorage?.setItem(STORAGE_KEYS.debateB, modelId);
-    }
+    safeStorageSet(STORAGE_KEYS.debateB, modelId);
   };
 
   const handleSetDebateJudge = (modelId) => {
     setDebateJudge(modelId);
-    if (typeof window !== "undefined") {
-      globalThis.localStorage?.setItem(STORAGE_KEYS.debateJudge, modelId);
-    }
+    safeStorageSet(STORAGE_KEYS.debateJudge, modelId);
   };
 
   const handleSetDebateRounds = (rounds) => {
     setDebateRounds(rounds);
-    if (typeof window !== "undefined") {
-      globalThis.localStorage?.setItem(STORAGE_KEYS.debateRounds, String(rounds));
-    }
+    safeStorageSet(STORAGE_KEYS.debateRounds, String(rounds));
   };
 
   const modelIndex = useMemo(() => {
@@ -812,6 +798,9 @@ export default function BasicChatPageClient() {
             if (chunk.stage) {
               if (chunk.stage === "complete" && chunk.content) {
                 assistantText = chunk.content;
+                setStreamingText(assistantText);
+              } else if (chunk.stage === "complete" && !chunk.success && (chunk.details?.error || chunk.error)) {
+                assistantText = `Error: ${chunk.details?.error || chunk.error}`;
                 setStreamingText(assistantText);
               } else {
                 setOrchestrationStatus((prev) => {

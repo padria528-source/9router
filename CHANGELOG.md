@@ -1,13 +1,26 @@
-# v0.5.86 (2026-09-23)
+# v0.5.86 (2026-09-28)
 
 ## Features
+- **External Agent Integration**: first-class model gateway support for Hermes Agent, Claude Code, and OpenAI Codex
+  - **Hermes Agent**: standard OpenAI `/v1/chat/completions` routing; full native tool calling, superpowers, and Obsidian Context Router preserved (`docs/integrations/hermes.md`)
+  - **Claude Code**: native Anthropic Messages API (`/v1/messages` and `/messages`) support; verified with tool calling, multi-turn (`-c`), and clean process termination (`docs/integrations/claude-code.md`)
+  - **OpenAI Codex**: native Responses API (`/v1/responses` and `/responses`, `wire_api = "responses"`); streaming reasoning/content, tools, and multi-turn resume (`docs/integrations/codex.md`)
+- **Chat Modes (Tunggal / Dewan / Debat)**: multi-model council consensus and debate orchestration in live chat UI with mobile-responsive layouts
+- **Reliability & Bounded Retry**: exponential backoff with jitter on transient upstream errors, `Retry-After` header parsing with ceiling veto, and centralized secret sanitization preventing key leakage
 - **Xiaomi MiMo**: server-assisted desktop login for headless/Docker deployments, five account clusters (cn/sgp/ams/ru/in), and v2.6 pro/flash/pro-ultraspeed models with dual-route (account service vs. cloud API)
-- **Claude**: add Claude Opus 5.5 support
+- **Claude**: add Claude Opus 5.5 support and thinking levels
 - **i18n**: translate React text rewrites via characterData mutation observer
 
 ## Fixes
+- **Live Chat**: guard `localStorage` access against sandbox security errors; propagate failure error text cleanly to UI
 - **Proxy Pools**: keep request headers intact through Vercel/Cloudflare/Deno relays (spreading a `Headers` instance yielded `{}`, dropping auth and content-type)
 - **Xiaomi MiMo login**: keep the session in the httpOnly cookie only, require dashboard auth on the proxy branch, and stop forwarding authorization headers upstream
+- **Translator**: remove deprecated parameter support workarounds; standardize format mappings
+
+## Migration & Agent Configuration
+- **Hermes**: Configure custom provider with base URL `https://<host>/v1` and your 9Router API key.
+- **Claude Code**: Set `ANTHROPIC_BASE_URL="https://<host>"` and `ANTHROPIC_API_KEY="YOUR_9ROUTER_API_KEY"`.
+- **Codex CLI**: Set `wire_api = "responses"` and `base_url = "https://<host>/v1"` in `~/.codex/config.toml` under `[model_providers.<name>]`.
 
 # v0.5.85 (2026-09-22)
 

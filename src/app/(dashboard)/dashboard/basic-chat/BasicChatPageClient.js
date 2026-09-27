@@ -10,6 +10,13 @@ const STORAGE_KEYS = {
   activeSessionId: "basic-chat.activeSessionId",
   activeProviderId: "basic-chat.activeProviderId",
   draft: "basic-chat.draft",
+  mode: "basic-chat.mode",
+  councilMembers: "basic-chat.council.members",
+  councilReviewer: "basic-chat.council.reviewer",
+  debateA: "basic-chat.debate.debaterA",
+  debateB: "basic-chat.debate.debaterB",
+  debateJudge: "basic-chat.debate.judge",
+  debateRounds: "basic-chat.debate.rounds",
 };
 
 function createId() {
@@ -200,11 +207,45 @@ export default function BasicChatPageClient() {
   const [isHydrated, setIsHydrated] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [appMode, setAppMode] = useState(() => {
+    if (typeof window === "undefined") return "tunggal";
+    return globalThis.localStorage?.getItem(STORAGE_KEYS.mode) || "tunggal";
+  });
+  const [councilMembers, setCouncilMembers] = useState(() => {
+    if (typeof window === "undefined") return [];
+    return safeParse(globalThis.localStorage?.getItem(STORAGE_KEYS.councilMembers), []);
+  });
+  const [councilReviewer, setCouncilReviewer] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return globalThis.localStorage?.getItem(STORAGE_KEYS.councilReviewer) || "";
+  });
+  const [debateA, setDebateA] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return globalThis.localStorage?.getItem(STORAGE_KEYS.debateA) || "";
+  });
+  const [debateB, setDebateB] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return globalThis.localStorage?.getItem(STORAGE_KEYS.debateB) || "";
+  });
+  const [debateJudge, setDebateJudge] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return globalThis.localStorage?.getItem(STORAGE_KEYS.debateJudge) || "";
+  });
+  const [debateRounds, setDebateRounds] = useState(() => {
+    if (typeof window === "undefined") return 2;
+    const r = parseInt(globalThis.localStorage?.getItem(STORAGE_KEYS.debateRounds), 10);
+    return r === 1 ? 1 : 2;
+  });
+  const [councilMenuOpen, setCouncilMenuOpen] = useState(false);
+  const [debateMenuOpen, setDebateMenuOpen] = useState(false);
+  const [orchestrationStatus, setOrchestrationStatus] = useState([]);
   const fileInputRef = useRef(null);
   const abortRef = useRef(null);
   const initializedRef = useRef(false);
   const modelMenuRef = useRef(null);
   const historyMenuRef = useRef(null);
+  const councilMenuRef = useRef(null);
+  const debateMenuRef = useRef(null);
 
   useEffect(() => {
     setIsHydrated(true);
@@ -325,11 +366,74 @@ export default function BasicChatPageClient() {
       if (historyMenuRef.current && !historyMenuRef.current.contains(event.target)) {
         setHistoryOpen(false);
       }
+      if (councilMenuRef.current && !councilMenuRef.current.contains(event.target)) {
+        setCouncilMenuOpen(false);
+      }
+      if (debateMenuRef.current && !debateMenuRef.current.contains(event.target)) {
+        setDebateMenuOpen(false);
+      }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const allModels = useMemo(() => {
+    return providerGroups.flatMap((g) => g.models || []);
+  }, [providerGroups]);
+
+  const handleSelectMode = (newMode) => {
+    setAppMode(newMode);
+    setOrchestrationStatus([]);
+    if (typeof window !== "undefined") {
+      globalThis.localStorage?.setItem(STORAGE_KEYS.mode, newMode);
+    }
+  };
+
+  const handleToggleCouncilMember = (modelId) => {
+    setCouncilMembers((prev) => {
+      const next = prev.includes(modelId) ? prev.filter((id) => id !== modelId) : [...prev, modelId];
+      if (typeof window !== "undefined") {
+        globalThis.localStorage?.setItem(STORAGE_KEYS.councilMembers, JSON.stringify(next));
+      }
+      return next;
+    });
+  };
+
+  const handleSetCouncilReviewer = (modelId) => {
+    setCouncilReviewer(modelId);
+    if (typeof window !== "undefined") {
+      globalThis.localStorage?.setItem(STORAGE_KEYS.councilReviewer, modelId);
+    }
+  };
+
+  const handleSetDebateA = (modelId) => {
+    setDebateA(modelId);
+    if (typeof window !== "undefined") {
+      globalThis.localStorage?.setItem(STORAGE_KEYS.debateA, modelId);
+    }
+  };
+
+  const handleSetDebateB = (modelId) => {
+    setDebateB(modelId);
+    if (typeof window !== "undefined") {
+      globalThis.localStorage?.setItem(STORAGE_KEYS.debateB, modelId);
+    }
+  };
+
+  const handleSetDebateJudge = (modelId) => {
+    setDebateJudge(modelId);
+    if (typeof window !== "undefined") {
+      globalThis.localStorage?.setItem(STORAGE_KEYS.debateJudge, modelId);
+    }
+  };
+
+  const handleSetDebateRounds = (rounds) => {
+    setDebateRounds(rounds);
+    if (typeof window !== "undefined") {
+      globalThis.localStorage?.setItem(STORAGE_KEYS.debateRounds, String(rounds));
+    }
+  };
 
   const modelIndex = useMemo(() => {
     const map = new Map();
@@ -625,6 +729,7 @@ export default function BasicChatPageClient() {
     setIsSending(true);
     setStreamingMessageId(assistantMessageId);
     setStreamingText("");
+    setOrchestrationStatus([]);
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
@@ -635,6 +740,26 @@ export default function BasicChatPageClient() {
         content: message.role === "user" ? buildUserContent(message) : message.content,
       }));
 
+    const requestPayload = {
+      mode: appMode,
+      model: model.requestModel || model.id,
+      messages: requestMessages,
+      stream: true,
+    };
+
+    if (appMode === "dewan") {
+      const effectiveMembers = councilMembers.length >= 2
+        ? councilMembers
+        : allModels.slice(0, 2).map((m) => m.requestModel || m.id);
+      requestPayload.memberModels = effectiveMembers;
+      requestPayload.reviewerModel = councilReviewer || effectiveMembers[0];
+    } else if (appMode === "debat") {
+      requestPayload.debaterA = debateA || model.requestModel || allModels[0]?.requestModel || allModels[0]?.id;
+      requestPayload.debaterB = debateB || allModels[1]?.requestModel || allModels[0]?.requestModel || allModels[0]?.id;
+      requestPayload.judgeModel = debateJudge || requestPayload.debaterA;
+      requestPayload.rounds = debateRounds;
+    }
+
     try {
       const response = await fetch("/api/dashboard/chat/completions", {
         method: "POST",
@@ -642,11 +767,7 @@ export default function BasicChatPageClient() {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         },
-        body: JSON.stringify({
-          model: model.requestModel || model.id,
-          messages: requestMessages,
-          stream: true,
-        }),
+        body: JSON.stringify(requestPayload),
         signal: abortRef.current.signal,
       });
 
@@ -658,7 +779,7 @@ export default function BasicChatPageClient() {
       const reader = response.body?.getReader();
       if (!reader) {
         const data = await response.json().catch(() => ({}));
-        const fallbackText = textValue(data?.choices?.[0]?.message?.content || data?.output_text || data?.error || data?.message || "");
+        const fallbackText = textValue(data?.choices?.[0]?.message?.content || data?.content || data?.output_text || data?.error || data?.message || "");
         updateSession(sessionId, (currentSession) => ({
           ...currentSession,
           messages: currentSession.messages.map((message) => (message.id === assistantMessageId ? { ...message, content: fallbackText, status: "done" } : message)),
@@ -676,7 +797,7 @@ export default function BasicChatPageClient() {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split(/\r?\n/);
+        const lines = buffer.split(String.fromCharCode(10));
         buffer = lines.pop() || "";
 
         for (const line of lines) {
@@ -688,6 +809,17 @@ export default function BasicChatPageClient() {
 
           try {
             const chunk = JSON.parse(payload);
+            if (chunk.stage) {
+              if (chunk.stage === "complete" && chunk.content) {
+                assistantText = chunk.content;
+                setStreamingText(assistantText);
+              } else {
+                setOrchestrationStatus((prev) => {
+                  const filtered = prev.filter((item) => !(item.stage === chunk.stage && item.model === chunk.model && item.round === chunk.round));
+                  return [...filtered, chunk];
+                });
+              }
+            }
             const text = readAssistantText(chunk);
             if (!text) continue;
 
@@ -741,59 +873,226 @@ export default function BasicChatPageClient() {
   return (
     <div className="relative flex-1 flex flex-col h-full min-h-0 min-w-0 bg-[#212121] text-white overflow-hidden">
       <div className="relative mx-auto flex flex-1 h-full min-h-0 w-full max-w-4xl flex-col">
-        <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 lg:px-6">
-          <div ref={modelMenuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setModelMenuOpen((value) => !value)}
-              className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left transition hover:bg-white/8"
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-white">{modelLabel}</span>
-                  <span className="material-symbols-outlined text-[18px] text-white/70">expand_more</span>
-                </div>
-                <p className="truncate text-xs text-white/55">{modelSubLabel}</p>
-              </div>
-            </button>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 px-4 py-3 lg:px-6">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Mode Selector */}
+            <div className="flex items-center rounded-2xl border border-white/10 bg-white/5 p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => handleSelectMode("tunggal")}
+                className={`rounded-xl px-3 py-2 font-medium transition ${appMode === "tunggal" ? "bg-white text-black font-semibold shadow" : "text-white/70 hover:text-white"}`}
+              >
+                Tunggal
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectMode("dewan")}
+                className={`rounded-xl px-3 py-2 font-medium transition ${appMode === "dewan" ? "bg-white text-black font-semibold shadow" : "text-white/70 hover:text-white"}`}
+              >
+                Dewan
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectMode("debat")}
+                className={`rounded-xl px-3 py-2 font-medium transition ${appMode === "debat" ? "bg-white text-black font-semibold shadow" : "text-white/70 hover:text-white"}`}
+              >
+                Debat
+              </button>
+            </div>
 
-            {modelMenuOpen ? (
-              <div className="absolute left-0 top-[calc(100%+10px)] z-30 w-[min(520px,calc(100vw-2rem))] overflow-hidden rounded-[20px] border border-white/10 bg-[#262626] shadow-2xl shadow-black/50">
-                <div className="border-b border-white/10 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.22em] text-white/45">Models</p>
-                  <p className="text-sm text-white/75">Only from connected providers</p>
-                </div>
-                <div className="max-h-[60vh] overflow-y-auto p-2 custom-scrollbar">
-                  {providerGroups.map((group) => (
-                    <div key={group.providerId} className="mb-2 rounded-[16px] border border-white/10 bg-black/20 p-2">
-                      <div className="flex items-center justify-between px-2 py-2">
-                        <p className="text-sm font-semibold text-white">{group.providerName}</p>
-                        <Badge size="sm" variant="default">{group.models.length}</Badge>
-                      </div>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        {group.models.map((model) => {
-                          const isActive = model.id === activeModelId;
+            {/* Mode-specific model selector controls */}
+            {appMode === "tunggal" ? (
+              <div ref={modelMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setModelMenuOpen((value) => !value)}
+                  className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-left transition hover:bg-white/8"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-white">{modelLabel}</span>
+                      <span className="material-symbols-outlined text-[18px] text-white/70">expand_more</span>
+                    </div>
+                    <p className="truncate text-xs text-white/55">{modelSubLabel}</p>
+                  </div>
+                </button>
+
+                {modelMenuOpen ? (
+                  <div className="absolute left-0 top-[calc(100%+10px)] z-30 w-[min(520px,calc(100vw-2rem))] overflow-hidden rounded-[20px] border border-white/10 bg-[#262626] shadow-2xl shadow-black/50">
+                    <div className="border-b border-white/10 px-4 py-3">
+                      <p className="text-xs uppercase tracking-[0.22em] text-white/45">Models</p>
+                      <p className="text-sm text-white/75">Only from connected providers</p>
+                    </div>
+                    <div className="max-h-[60vh] overflow-y-auto p-2 custom-scrollbar">
+                      {providerGroups.map((group) => (
+                        <div key={group.providerId} className="mb-2 rounded-[16px] border border-white/10 bg-black/20 p-2">
+                          <div className="flex items-center justify-between px-2 py-2">
+                            <p className="text-sm font-semibold text-white">{group.providerName}</p>
+                            <Badge size="sm" variant="default">{group.models.length}</Badge>
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            {group.models.map((model) => {
+                              const isActive = model.id === activeModelId;
+                              return (
+                                <button
+                                  key={model.id}
+                                  type="button"
+                                  onClick={() => handleSelectModel(model.id)}
+                                  className={`rounded-[14px] border px-3 py-3 text-left transition ${isActive ? "border-blue-400/40 bg-blue-500/15" : "border-white/10 bg-white/5 hover:bg-white/8"}`}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-medium text-white">{model.name}</p>
+                                      <p className="truncate text-[11px] text-white/45">{model.requestModel}</p>
+                                    </div>
+                                    {isActive ? <span className="material-symbols-outlined text-[18px] text-blue-300">check_circle</span> : null}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {appMode === "dewan" ? (
+              <div ref={councilMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setCouncilMenuOpen((v) => !v)}
+                  className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-left transition hover:bg-white/8 text-sm"
+                >
+                  <span className="material-symbols-outlined text-[18px] text-blue-400">groups</span>
+                  <span className="font-semibold text-white">Dewan ({councilMembers.length >= 2 ? councilMembers.length : 2} anggota)</span>
+                  <span className="material-symbols-outlined text-[18px] text-white/70">expand_more</span>
+                </button>
+                {councilMenuOpen ? (
+                  <div className="absolute left-0 top-[calc(100%+10px)] z-30 w-[min(480px,calc(100vw-2rem))] rounded-[20px] border border-white/10 bg-[#262626] p-4 shadow-2xl shadow-black/50 space-y-4">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.22em] text-white/45">Anggota Dewan</p>
+                      <p className="text-xs text-white/60">Pilih model yang berpartisipasi (minimal 2):</p>
+                      <div className="mt-2 max-h-48 overflow-y-auto space-y-1.5 custom-scrollbar">
+                        {allModels.map((m) => {
+                          const val = m.requestModel || m.id;
+                          const checked = councilMembers.length >= 2
+                            ? councilMembers.includes(val)
+                            : allModels.slice(0, 2).map((x) => x.requestModel || x.id).includes(val);
                           return (
-                            <button
-                              key={model.id}
-                              type="button"
-                              onClick={() => handleSelectModel(model.id)}
-                              className={`rounded-[14px] border px-3 py-3 text-left transition ${isActive ? "border-blue-400/40 bg-blue-500/15" : "border-white/10 bg-white/5 hover:bg-white/8"}`}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm font-medium text-white">{model.name}</p>
-                                  <p className="truncate text-[11px] text-white/45">{model.requestModel}</p>
-                                </div>
-                                {isActive ? <span className="material-symbols-outlined text-[18px] text-blue-300">check_circle</span> : null}
+                            <label key={m.id} className="flex items-center justify-between p-2 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer text-xs">
+                              <div className="min-w-0 pr-2">
+                                <p className="font-medium text-white truncate">{m.name}</p>
+                                <p className="text-[10px] text-white/40 truncate">{m.requestModel}</p>
                               </div>
-                            </button>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => handleToggleCouncilMember(val)}
+                                className="size-4 rounded accent-blue-500"
+                              />
+                            </label>
                           );
                         })}
                       </div>
                     </div>
-                  ))}
-                </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.22em] text-white/45">Penyintesis / Reviewer</p>
+                      <select
+                        value={councilReviewer || councilMembers[0] || (allModels[0]?.requestModel || "")}
+                        onChange={(e) => handleSetCouncilReviewer(e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 p-2 text-xs text-white"
+                      >
+                        {allModels.map((m) => (
+                          <option key={m.id} value={m.requestModel || m.id} className="bg-[#262626] text-white">
+                            {m.name} ({m.requestModel})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {appMode === "debat" ? (
+              <div ref={debateMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setDebateMenuOpen((v) => !v)}
+                  className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-left transition hover:bg-white/8 text-sm"
+                >
+                  <span className="material-symbols-outlined text-[18px] text-amber-400">gavel</span>
+                  <span className="font-semibold text-white">Debat ({debateRounds} Putaran)</span>
+                  <span className="material-symbols-outlined text-[18px] text-white/70">expand_more</span>
+                </button>
+                {debateMenuOpen ? (
+                  <div className="absolute left-0 top-[calc(100%+10px)] z-30 w-[min(480px,calc(100vw-2rem))] rounded-[20px] border border-white/10 bg-[#262626] p-4 shadow-2xl shadow-black/50 space-y-4">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.22em] text-white/45">Debater A</p>
+                      <select
+                        value={debateA || allModels[0]?.requestModel || ""}
+                        onChange={(e) => handleSetDebateA(e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 p-2 text-xs text-white"
+                      >
+                        {allModels.map((m) => (
+                          <option key={m.id} value={m.requestModel || m.id} className="bg-[#262626] text-white">
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.22em] text-white/45">Debater B</p>
+                      <select
+                        value={debateB || allModels[1]?.requestModel || allModels[0]?.requestModel || ""}
+                        onChange={(e) => handleSetDebateB(e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 p-2 text-xs text-white"
+                      >
+                        {allModels.map((m) => (
+                          <option key={m.id} value={m.requestModel || m.id} className="bg-[#262626] text-white">
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.22em] text-white/45">Hakim / Judge</p>
+                      <select
+                        value={debateJudge || debateA || allModels[0]?.requestModel || ""}
+                        onChange={(e) => handleSetDebateJudge(e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-white/10 bg-white/5 p-2 text-xs text-white"
+                      >
+                        {allModels.map((m) => (
+                          <option key={m.id} value={m.requestModel || m.id} className="bg-[#262626] text-white">
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.22em] text-white/45">Jumlah Putaran</p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleSetDebateRounds(1)}
+                          className={`flex-1 rounded-xl py-1.5 text-xs font-medium border ${debateRounds === 1 ? "bg-white text-black font-semibold border-white" : "bg-white/5 text-white/70 border-white/10"}`}
+                        >
+                          1 Putaran
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSetDebateRounds(2)}
+                          className={`flex-1 rounded-xl py-1.5 text-xs font-medium border ${debateRounds === 2 ? "bg-white text-black font-semibold border-white" : "bg-white/5 text-white/70 border-white/10"}`}
+                        >
+                          2 Putaran (Maksimum)
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -857,6 +1156,50 @@ export default function BasicChatPageClient() {
 
         <div className="flex flex-1 flex-col min-h-0">
           <div className="flex-1 overflow-y-auto py-4 custom-scrollbar">
+            {orchestrationStatus.length > 0 ? (
+              <div className="mx-auto mb-4 w-full max-w-3xl px-4">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between text-xs text-white/60">
+                    <span className="font-semibold uppercase tracking-wider">
+                      {appMode === "dewan" ? "Proses Dewan AI" : "Proses Debat AI"}
+                    </span>
+                    <span className="font-medium text-blue-400">
+                      {isSending ? "Sedang berjalan..." : "Selesai"}
+                    </span>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {orchestrationStatus.map((item, idx) => {
+                      const isProcessing = item.status === "Memproses";
+                      const isCompleted = item.status === "Selesai";
+                      const isFailed = item.status === "Gagal";
+
+                      const badgeColor = isProcessing
+                        ? "border-blue-400/40 bg-blue-500/20 text-blue-300"
+                        : isCompleted
+                        ? "border-emerald-400/40 bg-emerald-500/20 text-emerald-300"
+                        : isFailed
+                        ? "border-rose-400/40 bg-rose-500/20 text-rose-300"
+                        : "border-white/10 bg-white/5 text-white/50";
+
+                      let label = item.model || item.stage;
+                      if (item.stage === "reviewer") label = `Reviewer: ${item.model}`;
+                      if (item.stage === "judge") label = `Hakim: ${item.model}`;
+                      if (item.round) label = `Putaran ${item.round}: ${item.model}`;
+
+                      return (
+                        <div key={idx} className="flex items-center justify-between rounded-xl border border-white/5 bg-black/20 px-3 py-2 text-xs">
+                          <span className="truncate font-medium text-white/80 pr-2">{label}</span>
+                          <span className={`shrink-0 rounded-lg border px-2 py-0.5 text-[11px] font-semibold ${badgeColor}`}>
+                            {item.status}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {currentMessages.length === 0 ? (
               <div className="flex min-h-[50vh] items-center justify-center px-4 text-center">
                 <div className="max-w-xl space-y-4">

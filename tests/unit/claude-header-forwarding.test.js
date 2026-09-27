@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { CLAUDE_CLI_VERSION } from "../../open-sse/providers/shared.js";
 
 // ─── DefaultExecutor.buildHeaders() ──────────────────────────────────────────
 
@@ -23,13 +24,13 @@ describe("DefaultExecutor.buildHeaders() — claude provider", () => {
 
   it("uses static provider defaults when no model is given", () => {
     const executor = new DefaultExecutor("claude");
-    const headers = executor.buildHeaders({ apiKey: "sk-test" }, true);
+    const headers = executor.buildHeaders({ apiKey: "test-key" }, true);
 
     const hasVersion =
       headers["Anthropic-Version"] === "2023-06-01" ||
       headers["anthropic-version"] === "2023-06-01";
     expect(hasVersion).toBe(true);
-    expect(headers["User-Agent"]).toBe("claude-cli/2.1.258 (external, sdk-cli)");
+    expect(headers["User-Agent"]).toBe(`claude-cli/${CLAUDE_CLI_VERSION} (external, sdk-cli)`);
   });
 
   it("includes heavy-agent beta flags for claude-opus-5", () => {

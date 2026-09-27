@@ -51,6 +51,8 @@ source/*
 .cursor/*
 docs/*
 !docs/ARCHITECTURE.md
+!docs/integrations/
+!docs/integrations/*
 test/*
 open-sse/test/*
 RM.vn.md

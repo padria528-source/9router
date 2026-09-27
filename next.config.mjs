@@ -76,6 +76,14 @@ const nextConfig = {
         destination: "/api/v1/responses"
       },
       {
+        source: "/messages/:path*",
+        destination: "/api/v1/messages/:path*"
+      },
+      {
+        source: "/messages",
+        destination: "/api/v1/messages"
+      },
+      {
         source: "/systemone",
         destination: "/api/v1/systemone"
       },

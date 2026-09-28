@@ -1,4 +1,4 @@
-import { createClient } from "@libsql/client";
+import { createClient } from "@libsql/client/http";
 import { TABLES, buildCreateTableSql } from "../schema.js";
 
 const MIRROR_READY_KEY = "tursoMirrorReady";

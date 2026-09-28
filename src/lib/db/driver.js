@@ -56,8 +56,7 @@ async function trySqlJs() {
   }
 }
 
-async function initAdapter() {
-  ensureDirs();
+async function createLocalAdapter() {
   // Order per runtime:
   //   Bun:  bun:sqlite → sql.js
   //   Node: better-sqlite3 → node:sqlite (≥22.5) → sql.js
@@ -66,20 +65,54 @@ async function initAdapter() {
   if (!adapter) adapter = await tryNodeSqlite();
   if (!adapter) adapter = await trySqlJs();
   if (!adapter) throw new Error("[DB] No SQLite driver available (bun/better/node/sql.js all failed)");
+  return adapter;
+}
+
+async function maybeWrapWithTurso(localAdapter) {
+  const url = process.env.TURSO_DATABASE_URL?.trim();
+  if (!url) return localAdapter;
+
+  const authToken = process.env.TURSO_AUTH_TOKEN?.trim();
+  if (!authToken) {
+    throw new Error("[DB] TURSO_DATABASE_URL is set but TURSO_AUTH_TOKEN is missing");
+  }
+
+  const { createTursoMirrorAdapter } = await import("./adapters/tursoMirrorAdapter.js");
+  return await createTursoMirrorAdapter(localAdapter, { url, authToken });
+}
+
+async function initAdapter() {
+  ensureDirs();
+
+  // Migrations stay on the synchronous local SQLite adapter. This preserves the
+  // existing DB contract used throughout 9Router. Turso is layered on after the
+  // local schema is ready, so no application callsite needs an async DB rewrite.
+  const localAdapter = await createLocalAdapter();
+
+  const { runMigrationOnce } = await import("./migrate.js");
+  await runMigrationOnce(localAdapter);
+
+  const adapter = await maybeWrapWithTurso(localAdapter);
 
   if (!state.logged) {
-    console.log(`[DB] Driver: ${adapter.driver} | file: ${DATA_FILE}`);
+    const suffix = adapter.driver === "turso-mirror"
+      ? ` | local: ${localAdapter.driver} | remote persistence: Turso`
+      : ` | file: ${DATA_FILE}`;
+    console.log(`[DB] Driver: ${adapter.driver}${suffix}`);
     state.logged = true;
   }
 
-  const { runMigrationOnce } = await import("./migrate.js");
-  await runMigrationOnce(adapter);
   return adapter;
 }
 
 export async function getAdapter() {
   if (state.instance) return state.instance;
-  if (!state.initPromise) state.initPromise = initAdapter().then((a) => { state.instance = a; return a; });
+  if (!state.initPromise) {
+    state.initPromise = initAdapter().then((a) => {
+      state.instance = a;
+      return a;
+    });
+  }
   return state.initPromise;
 }
 

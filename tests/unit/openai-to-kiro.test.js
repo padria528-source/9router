@@ -11,7 +11,13 @@ import { openaiToKiroRequest } from "../../open-sse/translator/request/openai-to
 
 const contentOf = (result) =>
   result.conversationState.currentMessage.userInputMessage.content;
-const systemPromptOf = (result) => result.systemPrompt || "";
+// CodeWhisperer rejects a top-level systemPrompt. The stable instructions
+// precede the volatile time context in the first user turn instead.
+const systemPromptOf = (result) => {
+  const firstUser = result.conversationState.history.find((turn) => turn.userInputMessage)
+    ?.userInputMessage || result.conversationState.currentMessage.userInputMessage;
+  return firstUser.content.split("[Context: Current time is ")[0].trim();
+};
 
 describe("openaiToKiroRequest", () => {
   describe("basic message conversion", () => {
@@ -532,7 +538,7 @@ describe("openaiToKiroRequest", () => {
       const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
 
       expect(systemPromptOf(result)).toContain("<max_thinking_length>32000</max_thinking_length>");
-      expect(result.additionalModelRequestFields?.output_config?.effort).toBe("high");
+      expect(result.additionalModelRequestFields?.output_config?.effort).toBe("max");
     });
 
     it("clamps OpenAI Responses reasoning.effort xhigh to max_thinking_length 32000", () => {
@@ -568,7 +574,7 @@ describe("openaiToKiroRequest", () => {
       expect(systemPromptOf(result)).toContain("<max_thinking_length>16000</max_thinking_length>");
     });
 
-    it("keeps top-level systemPrompt stable across turns", () => {
+    it("keeps embedded instruction prefix stable across turns without an invalid top-level field", () => {
       const first = openaiToKiroRequest(
         "claude-sonnet-4.6-thinking",
         { messages: [{ role: "user", content: "first" }] },
@@ -582,8 +588,11 @@ describe("openaiToKiroRequest", () => {
         {}
       );
 
-      expect(first.systemPrompt).toBe(second.systemPrompt);
-      expect(first.systemPrompt).not.toContain("Current time");
+      expect(first).not.toHaveProperty("systemPrompt");
+      expect(second).not.toHaveProperty("systemPrompt");
+      expect(systemPromptOf(first)).toBe(systemPromptOf(second));
+      expect(systemPromptOf(first)).toContain("<thinking_mode>enabled</thinking_mode>");
+      expect(systemPromptOf(first)).not.toContain("Current time");
       expect(first.conversationState.currentMessage.userInputMessage.content).toContain("Current time");
     });
 

@@ -1,4 +1,5 @@
 import { EventEmitter } from "events";
+import { createHash } from "node:crypto";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
@@ -665,6 +666,13 @@ export async function getUsageStats(period = "all") {
   }
 
   stats.totalRequests = Object.values(stats.byProvider).reduce((sum, p) => sum + (p.requests || 0), 0);
+  // Internal keys keep exact account attribution and the last-used overlay.
+  // JSON object property names are public data too: replace them only at the
+  // response boundary, without merging accounts that share a masked prefix.
+  stats.byApiKey = Object.fromEntries(Object.entries(stats.byApiKey).map(([bucket, entry]) => [
+    bucket === "local-no-key" ? bucket : `api-key-${createHash("sha256").update(bucket).digest("hex")}`,
+    entry,
+  ]));
   return stats;
 }
 

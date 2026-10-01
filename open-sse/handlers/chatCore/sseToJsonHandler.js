@@ -6,10 +6,68 @@ import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
+import { fromOpenAIFinish } from "../../translator/concerns/finishReason.js";
+import { extractReasoningText } from "../../translator/concerns/reasoning.js";
 
 // Responses-API providers (e.g. codex) may emit SSE without content-type + use Responses output shape
 const isResponsesProvider = (p) => PROVIDERS[p]?.format === FORMATS.OPENAI_RESPONSES;
 import { saveRequestDetail, appendRequestLog } from "@/lib/usageDb.js";
+
+function parseToolArguments(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+function openAICompletionToClaudeMessage(responseBody) {
+  if (!responseBody?.choices?.[0]) return responseBody;
+  const choice = responseBody.choices[0];
+  const message = choice.message || {};
+  const content = [];
+
+  const reasoning = extractReasoningText(message)
+    || message.provider_specific_fields?.reasoning_content || "";
+  if (reasoning) {
+    content.push({ type: "thinking", thinking: reasoning });
+  }
+  if (typeof message.content === "string" && message.content.length > 0) {
+    content.push({ type: "text", text: message.content });
+  }
+  for (const toolCall of message.tool_calls || []) {
+    const fn = toolCall.function || {};
+    content.push({
+      type: "tool_use",
+      id: toolCall.id || `toolu_${Date.now()}_${content.length}`,
+      name: fn.name || toolCall.name || "",
+      input: parseToolArguments(fn.arguments || toolCall.arguments),
+    });
+  }
+  if (content.length === 0) content.push({ type: "text", text: "" });
+
+  const usage = responseBody.usage || {};
+  const cacheRead = usage.prompt_tokens_details?.cached_tokens || usage.cache_read_input_tokens || 0;
+  const cacheCreate = usage.prompt_tokens_details?.cache_creation_tokens || usage.cache_creation_input_tokens || 0;
+  const promptTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+  return {
+    id: String(responseBody.id || `msg_${Date.now()}`).replace(/^chatcmpl-/, ""),
+    type: "message",
+    role: "assistant",
+    model: responseBody.model || "unknown",
+    content,
+    stop_reason: fromOpenAIFinish(message.tool_calls?.length ? "tool_calls" : choice.finish_reason, FORMATS.CLAUDE),
+    stop_sequence: null,
+    usage: {
+      input_tokens: Math.max(0, promptTokens - cacheRead - cacheCreate),
+      output_tokens: usage.completion_tokens ?? usage.output_tokens ?? 0,
+      ...(cacheRead > 0 && { cache_read_input_tokens: cacheRead }),
+      ...(cacheCreate > 0 && { cache_creation_input_tokens: cacheCreate }),
+    },
+  };
+}
 
 function textFromResponsesMessageItem(item) {
   if (!item?.content || !Array.isArray(item.content)) return "";
@@ -38,8 +96,7 @@ function pickAssistantMessageForChatCompletion(output) {
 
 /**
  * Convert an OpenAI Chat Completions JSON body into the Responses API shape.
- * Inlined here (not imported from nonStreamingHandler.js) to avoid a circular
- * import. Mirrors openAICompletionToResponses in nonStreamingHandler.js.
+ * Shared by native JSON and forced-streaming providers after normalization.
  */
 function extractCustomToolInput(argumentsValue) {
   const argumentsText = typeof argumentsValue === "string" ? argumentsValue : JSON.stringify(argumentsValue || {});
@@ -57,7 +114,7 @@ function chatCompletionToResponses(responseBody, customToolNames = null) {
   const message = choice.message || {};
   const output = [];
 
-  const reasoning = message.reasoning_content || message.reasoning;
+  const reasoning = extractReasoningText(message);
   if (typeof reasoning === "string" && reasoning.length > 0) {
     output.push({
       type: RESPONSES_ITEM.REASONING,
@@ -94,7 +151,8 @@ function chatCompletionToResponses(responseBody, customToolNames = null) {
     object: "response",
     created_at: responseBody.created || Math.floor(Date.now() / 1000),
     model: responseBody.model || "unknown",
-    status: "completed",
+    status: choice.finish_reason === "length" ? "incomplete" : "completed",
+    ...(choice.finish_reason === "length" && { incomplete_details: { reason: "max_output_tokens" } }),
     background: false,
     error: null,
     output,
@@ -102,8 +160,17 @@ function chatCompletionToResponses(responseBody, customToolNames = null) {
       input_tokens: usage.prompt_tokens || usage.input_tokens || 0,
       output_tokens: usage.completion_tokens || usage.output_tokens || 0,
       total_tokens: usage.total_tokens || (usage.prompt_tokens || 0) + (usage.completion_tokens || 0),
+      ...(usage.prompt_tokens_details && { input_tokens_details: usage.prompt_tokens_details }),
+      ...(usage.completion_tokens_details && { output_tokens_details: usage.completion_tokens_details }),
     },
   };
+}
+
+/** Convert normalized provider output to the client's requested API envelope. */
+export function chatCompletionToClientResponse(responseBody, sourceFormat, customToolNames = null) {
+  if (sourceFormat === FORMATS.CLAUDE) return openAICompletionToClaudeMessage(responseBody);
+  if (sourceFormat === FORMATS.OPENAI_RESPONSES) return chatCompletionToResponses(responseBody, customToolNames);
+  return responseBody;
 }
 
 /**
@@ -247,13 +314,16 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       let finalResp;
 
       // Extract tool calls from Responses API output (function_call items)
-      const funcCallItems = (jsonResponse.output || []).filter(item => item.type === "function_call");
+      const funcCallItems = (jsonResponse.output || []).filter(item =>
+        item.type === RESPONSES_ITEM.FUNCTION_CALL || item.type === RESPONSES_ITEM.CUSTOM_TOOL_CALL);
       const toolCalls = funcCallItems.map((item, idx) => ({
         id: item.call_id || `call_${item.name}_${Date.now()}_${idx}`,
         type: "function",
         function: {
           name: item.name,
-          arguments: typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments || {})
+          arguments: item.type === RESPONSES_ITEM.CUSTOM_TOOL_CALL
+            ? JSON.stringify({ input: item.input || "" })
+            : typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments || {})
         }
       }));
       const hasToolCalls = toolCalls.length > 0;
@@ -269,6 +339,12 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         };
       } else {
         const message = { role: "assistant", content: textContent || (hasToolCalls ? null : "") };
+        const reasoning = (jsonResponse.output || [])
+          .filter(item => item.type === RESPONSES_ITEM.REASONING)
+          .flatMap(item => item.summary || [])
+          .map(part => typeof part.text === "string" ? part.text : "")
+          .join("");
+        if (reasoning) message.reasoning_content = reasoning;
         if (hasToolCalls) message.tool_calls = toolCalls;
         const responseDone = jsonResponse.status === "completed" || jsonResponse.status === "done";
         const finishReason = hasToolCalls ? "tool_calls" : (responseDone ? "stop" : (jsonResponse.status || "stop"));
@@ -281,6 +357,8 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
           usage: { prompt_tokens: inTokens, completion_tokens: outTokens, total_tokens: inTokens + outTokens, ...cacheDetails }
         };
       }
+
+      finalResp = chatCompletionToClientResponse(finalResp, sourceFormat, customToolNames);
 
       return { success: true, response: new Response(JSON.stringify(restoreToolNames(finalResp, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
     } catch (err) {
@@ -342,7 +420,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
     // When content is empty (e.g. thinking models that used all tokens for reasoning),
     // reasoning_content is the only useful output and must be preserved.
     // Previously this was unconditional, which broke Qwen3.5, Claude extended thinking, etc.
-    if (parsed?.choices) {
+    if (sourceFormat === FORMATS.OPENAI && parsed?.choices) {
       for (const choice of parsed.choices) {
         if (choice?.message?.reasoning_content && choice.message.content) {
           delete choice.message.reasoning_content;
@@ -350,15 +428,9 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       }
     }
 
-    // A Responses-format client (e.g. Codex) forced this provider to stream,
-    // but wants JSON back. parseSSEToOpenAIResponse yields a Chat Completions
-    // body; convert it to the Responses `output` shape so tool_calls are not
-    // lost on the non-streaming return path. Inlined (not imported from
-    // nonStreamingHandler.js) to avoid a circular import: nonStreamingHandler
-    // already imports parseSSEToOpenAIResponse from this module.
-    const finalBody = sourceFormat === FORMATS.OPENAI_RESPONSES
-      ? chatCompletionToResponses(parsed, customToolNames)
-      : parsed;
+    // Convert before client-specific post-processing can discard thinking or
+    // leave tool calls in an envelope the client cannot read.
+    const finalBody = chatCompletionToClientResponse(parsed, sourceFormat, customToolNames);
 
     return { success: true, response: new Response(JSON.stringify(restoreToolNames(finalBody, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
   } catch (err) {

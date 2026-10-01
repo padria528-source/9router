@@ -18,14 +18,18 @@ function mockFetchOnce(bytes, ok = true) {
       };
     },
   };
-  globalThis.fetch = vi.fn(async () => ({ ok, body }));
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok, body })));
 }
 
 beforeEach(() => {
   lookupMock.mockReset();
-  lookupMock.mockResolvedValue({ address: "93.184.216.34" }); // public by default
+  lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]); // public by default
+  vi.stubGlobal("fetch", vi.fn());
 });
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("fetchImageAsBase64 hardening", () => {
   it("rejects non-http url", async () => {
@@ -34,12 +38,13 @@ describe("fetchImageAsBase64 hardening", () => {
   });
 
   it("SSRF: rejects private IP (10.x)", async () => {
-    lookupMock.mockResolvedValue({ address: "10.0.0.5" });
+    lookupMock.mockResolvedValue([{ address: "10.0.0.5", family: 4 }]);
     expect(await fetchImageAsBase64("http://internal.example/x.png")).toBeNull();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it("SSRF: rejects cloud metadata 169.254.169.254", async () => {
-    lookupMock.mockResolvedValue({ address: "169.254.169.254" });
+    lookupMock.mockResolvedValue([{ address: "169.254.169.254", family: 4 }]);
     expect(await fetchImageAsBase64("http://metadata/x.png")).toBeNull();
   });
 
@@ -48,7 +53,7 @@ describe("fetchImageAsBase64 hardening", () => {
   });
 
   it("SSRF: rejects IPv6 loopback", async () => {
-    lookupMock.mockResolvedValue({ address: "::1" });
+    lookupMock.mockResolvedValue([{ address: "::1", family: 6 }]);
     expect(await fetchImageAsBase64("http://x/y.png")).toBeNull();
   });
 
@@ -58,6 +63,7 @@ describe("fetchImageAsBase64 hardening", () => {
     expect(r).not.toBeNull();
     expect(r.mimeType).toBe("image/png");
     expect(r.url.startsWith("data:image/png;base64,")).toBe(true);
+    expect(lookupMock).toHaveBeenCalledWith("example.com", { all: true });
   });
 
   it("rejects disguised non-image payload (magic byte mismatch)", async () => {

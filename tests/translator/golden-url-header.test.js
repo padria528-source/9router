@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import { PROVIDERS } from "../../open-sse/config/providers.js";
 import { DefaultExecutor } from "../../open-sse/executors/default.js";
+import pkg from "../../package.json";
 
 // Credentials mẫu cố định (deterministic) — KHÔNG dùng Date.now/random.
 const API_KEY_CRED = { apiKey: "sk-test-APIKEY", providerSpecificData: {} };
@@ -27,6 +28,29 @@ const SPECIALIZED = new Set([
 function sanitize(headers) {
   const out = {};
   for (const [k, v] of Object.entries(headers)) {
+    // Keep the fixture portable across app releases, Windows/Linux and Node
+    // versions while still verifying that the headers use the actual runtime.
+    if (["X-CLIENT-VERSION", "X-CORE-VERSION", "X-Msh-Version"].includes(k)) {
+      expect(v).toBe(pkg.version);
+      out[k] = "<APP_VERSION>";
+      continue;
+    }
+    if (k === "User-Agent" && v.startsWith("9Router/")) {
+      expect(v).toBe(`9Router/${pkg.version}`);
+      out[k] = "9Router/<APP_VERSION>";
+      continue;
+    }
+    if (k === "X-PLATFORM" || k === "X-PLATFORM-VERSION") {
+      expect(v).toBe(k === "X-PLATFORM" ? process.platform : process.version);
+      out[k] = k === "X-PLATFORM" ? "<PLATFORM>" : "<NODE_VERSION>";
+      continue;
+    }
+    if (k === "X-Msh-Device-Name" || k === "X-Msh-Device-Model") {
+      expect(typeof v).toBe("string");
+      expect(v.length).toBeGreaterThan(0);
+      out[k] = k === "X-Msh-Device-Name" ? "<DEVICE_NAME>" : "<DEVICE_MODEL>";
+      continue;
+    }
     out[k] = typeof v === "string"
       ? v.replace(/Bearer .+/, "Bearer <TOK>")
           .replace(/sk-test-APIKEY|tok-test-ACCESS/g, "<CRED>")
@@ -45,9 +69,13 @@ describe("GOLDEN buildUrl (default executor providers)", () => {
       const cred = PROVIDERS[pid].noAuth ? {} : SPECIAL_CRED;
       const model = "test-model";
       const snap = {
-        stream: safe(() => ex.buildUrl(model, true, 0, cred)),
-        nonStream: safe(() => ex.buildUrl(model, false, 0, cred)),
+        stream: ex.buildUrl(model, true, 0, cred),
+        nonStream: ex.buildUrl(model, false, 0, cred),
       };
+      for (const url of Object.values(snap)) {
+        expect(["http:", "https:"]).toContain(new URL(url).protocol);
+        expect(url).not.toMatch(/\{(?:accountId|model)\}/);
+      }
       expect(snap).toMatchSnapshot();
     });
   }
@@ -58,15 +86,11 @@ describe("GOLDEN buildHeaders (default executor providers)", () => {
     it(`${pid} → headers (apiKey / oauth)`, () => {
       const ex = new DefaultExecutor(pid);
       const snap = {
-        apiKey: safe(() => sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : API_KEY_CRED, true))),
-        oauth: safe(() => sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : OAUTH_CRED, true))),
-        nonStream: safe(() => sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : API_KEY_CRED, false))),
+        apiKey: sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : API_KEY_CRED, true)),
+        oauth: sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : OAUTH_CRED, true)),
+        nonStream: sanitize(ex.buildHeaders(PROVIDERS[pid].noAuth ? {} : API_KEY_CRED, false)),
       };
       expect(snap).toMatchSnapshot();
     });
   }
 });
-
-function safe(fn) {
-  try { return fn(); } catch (e) { return `THROW: ${e.message}`; }
-}

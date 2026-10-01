@@ -1,5 +1,5 @@
 // Acceptance suite for the Zed native-app auth fix.
-// RUN WITH AN ISOLATED DB:  DATA_DIR=$(mktemp -d) npx vitest run unit/zed-native-auth.test.js
+// The suite creates and closes its own temporary DB, including when run directly.
 //
 // Covers criteria:
 //   1. Zed proxy starts
@@ -9,24 +9,51 @@
 //   5. systemId identical authorize → exchange → stored connection
 //   6. register-session failure is distinguishable (backend contract)
 //   8. (backend) reopen/re-register creates a fresh session
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { closeTestDb } from "../helpers/test-db.js";
 import {
   createZedNativeAuthData,
   parseZedCallbackPayload,
   decryptZedAccessToken,
 } from "open-sse/shared/zedAuth.js";
-import {
-  startZedProxy,
-  stopZedProxy,
-  registerZedSession,
-  getZedSessionStatus,
-  clearZedSession,
-} from "@/lib/oauth/utils/server.js";
-import {
-  generateAuthData,
-  exchangeTokens,
-} from "@/lib/oauth/providers/index.js";
+let startZedProxy, stopZedProxy, registerZedSession, getZedSessionStatus, clearZedSession;
+let generateAuthData, exchangeTokens;
+let tempDir;
+const envNames = ["DATA_DIR", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DISABLE_BACKGROUND_TOKEN_REFRESH"];
+const originalEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+
+beforeAll(async () => {
+  const testRoot = process.env.NINE_ROUTER_TEST_DATA_ROOT || os.tmpdir();
+  fs.mkdirSync(testRoot, { recursive: true });
+  tempDir = fs.mkdtempSync(path.join(testRoot, "9router-zed-native-"));
+  process.env.DATA_DIR = tempDir;
+  delete process.env.TURSO_DATABASE_URL;
+  delete process.env.TURSO_AUTH_TOKEN;
+  process.env.DISABLE_BACKGROUND_TOKEN_REFRESH = "true";
+  // Import after DATA_DIR is set: the providers module reaches DB path constants.
+  vi.resetModules();
+  ({ startZedProxy, stopZedProxy, registerZedSession, getZedSessionStatus, clearZedSession } =
+    await import("@/lib/oauth/utils/server.js"));
+  ({ generateAuthData, exchangeTokens } = await import("@/lib/oauth/providers/index.js"));
+// Cold-loading the complete OAuth registry can exceed Vitest's 10s hook default on Windows.
+}, 30000);
+
+afterAll(() => {
+  stopZedProxy?.();
+  closeTestDb();
+  try {
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  } finally {
+    for (const name of envNames) {
+      if (originalEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = originalEnv[name];
+    }
+  }
+});
 
 const realFetch = globalThis.fetch;
 

@@ -7,6 +7,7 @@ import { parseDataUri } from "../concerns/image.js";
 import { extractTextContent } from "../formats/gemini.js";
 import { ROLE, OPENAI_BLOCK, CLAUDE_BLOCK } from "../schema/index.js";
 import { getCapabilitiesForModel } from "../../providers/capabilities.js";
+import { extractReasoningText } from "../concerns/reasoning.js";
 
 // Empty prefix matches real Claude Code behavior (no tool name prefix).
 // Previously "proxy_" was used but this is a detectable fingerprint difference.
@@ -253,6 +254,16 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map()) {
       }
     }
   } else if (msg.role === ROLE.ASSISTANT) {
+    // OpenAI-compatible providers return reasoning separately from content.
+    // Keep it through the format bridge; prepareClaudeRequest applies the
+    // target provider's signed-thinking rules before anything goes upstream.
+    const reasoning = extractReasoningText(msg);
+    const hasThinkingBlock = Array.isArray(msg.content)
+      && msg.content.some(part => part?.type === CLAUDE_BLOCK.THINKING
+        || part?.type === CLAUDE_BLOCK.REDACTED_THINKING);
+    if (reasoning && !hasThinkingBlock) {
+      blocks.push({ type: CLAUDE_BLOCK.THINKING, thinking: reasoning });
+    }
     if (Array.isArray(msg.content)) {
       for (const part of msg.content) {
         if (part.type === OPENAI_BLOCK.TEXT && part.text) {

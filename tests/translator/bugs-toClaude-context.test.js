@@ -33,6 +33,31 @@ describe("OpenAI → Claude context mapping", () => {
     }));
   });
 
+  it("does not replay unsigned OpenAI reasoning to native Claude", () => {
+    const out = translateRequest(FORMATS.OPENAI, FORMATS.CLAUDE, "claude-sonnet-4.6", {
+      messages: [
+        { role: "user", content: "q" },
+        { role: "assistant", content: "a", reasoning_content: "foreign reasoning" },
+        { role: "user", content: "next" },
+      ],
+    }, true, null, "claude");
+    expect(JSON.stringify(out)).not.toContain("foreign reasoning");
+    expect(out.messages.find(message => message.role === "assistant").content)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ type: "text", text: "a" })]));
+  });
+
+  it("preserves separate reasoning on DeepSeek's Claude-compatible transport", () => {
+    const out = translateRequest(FORMATS.OPENAI, FORMATS.CLAUDE, "deepseek-v4-pro", {
+      messages: [
+        { role: "user", content: "q" },
+        { role: "assistant", content: "a", reasoning_content: "provider reasoning" },
+        { role: "user", content: "next" },
+      ],
+    }, true, null, "deepseek");
+    expect(out.messages.find(message => message.role === "assistant").content[0])
+      .toEqual({ type: "thinking", thinking: "provider reasoning" });
+  });
+
   // openai-to-claude.js:298 — tool_choice "none" mapped to {type:"auto"} (loses "do not call" intent)
   // KNOWN BUG
   it.fails("tool_choice=none is not turned into auto", () => {

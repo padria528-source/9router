@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import path from "node:path";
 
 const mocks = vi.hoisted(() => ({
   execSync: vi.fn(() => { throw new Error("not found"); }),
@@ -39,9 +40,11 @@ describe("headroom detect", () => {
 
   it("prefers the interpreter that actually has headroom-ai installed", () => {
     // headroom binary lives in a bin dir; the python next to it has headroom-ai.
-    const binPython = "/opt/hr/bin/python3";
+    const binDir = path.resolve("fixture-headroom", "bin");
+    const binPython = path.join(binDir, process.platform === "win32" ? "python.exe" : "python3");
+    const headroomBinary = path.join(binDir, process.platform === "win32" ? "headroom.exe" : "headroom");
     mocks.execSync.mockImplementation((cmd) => {
-      if (String(cmd).includes("where") || String(cmd).includes("which")) return Buffer.from("/opt/hr/bin/headroom\n");
+      if (String(cmd).includes("where") || String(cmd).includes("which")) return Buffer.from(`${headroomBinary}\n`);
       if (String(cmd).includes("--version")) return Buffer.from("Python 3.13.0\n");
       throw new Error("unexpected execSync");
     });

@@ -6,6 +6,8 @@
   "description": "Unit tests for 9router embeddings endpoint",
   "scripts": {
     "test": "vitest run --reporter=verbose",
+    "test:node": "node --loader ./helpers/aliases-loader.mjs --test auth/saml.test.js unit/cline-auth.test.js unit/kimchi.test.js unit/kimchi-strip-reasoning.test.js",
+    "test:offline": "node ./scripts/run-offline.mjs",
     "test:watch": "vitest --reporter=verbose"
   },
   "devDependencies": {

@@ -1,4 +1,6 @@
 // Acceptance suite for the Zed native-app auth fix.
+// Self-isolating: DATA_DIR points at a temp dir before the DB layer loads,
+// so criterion 3's connection save never reaches the real ~/.9router DB or Turso.
 // The suite creates and closes its own temporary DB, including when run directly.
 //
 // Covers criteria:

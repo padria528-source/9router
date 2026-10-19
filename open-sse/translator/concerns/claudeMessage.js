@@ -37,17 +37,22 @@ export function openAICompletionToClaudeMessage(responseBody) {
   if (content.length === 0) content.push({ type: CLAUDE_BLOCK.TEXT, text: "" });
 
   const usage = responseBody.usage || {};
+  const cacheRead = usage.prompt_tokens_details?.cached_tokens || usage.cache_read_input_tokens || 0;
+  const cacheCreate = usage.prompt_tokens_details?.cache_creation_tokens || usage.cache_creation_input_tokens || 0;
+  const promptTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
   return {
     id: String(responseBody.id || `msg_${Date.now()}`).replace(/^chatcmpl-/, ""),
     type: RESPONSES_ITEM.MESSAGE,
     role: ROLE.ASSISTANT,
     model: responseBody.model || MODEL_FALLBACK,
     content,
-    stop_reason: fromOpenAIFinish(choice.finish_reason, FORMATS.CLAUDE),
+    stop_reason: fromOpenAIFinish(message.tool_calls?.length ? "tool_calls" : choice.finish_reason, FORMATS.CLAUDE),
     stop_sequence: null,
     usage: {
-      input_tokens: usage.prompt_tokens || usage.input_tokens || 0,
-      output_tokens: usage.completion_tokens || usage.output_tokens || 0,
+      input_tokens: Math.max(0, promptTokens - cacheRead - cacheCreate),
+      output_tokens: usage.completion_tokens ?? usage.output_tokens ?? 0,
+      ...(cacheRead > 0 && { cache_read_input_tokens: cacheRead }),
+      ...(cacheCreate > 0 && { cache_creation_input_tokens: cacheCreate }),
     },
   };
 }

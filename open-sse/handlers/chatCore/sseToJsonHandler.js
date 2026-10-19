@@ -14,62 +14,6 @@ import { extractReasoningText } from "../../translator/concerns/reasoning.js";
 const isResponsesProvider = (p) => PROVIDERS[p]?.format === FORMATS.OPENAI_RESPONSES;
 import { saveRequestDetail, appendRequestLog } from "@/lib/usageDb.js";
 
-function parseToolArguments(value) {
-  if (!value) return {};
-  if (typeof value === "object") return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return {};
-  }
-}
-
-function openAICompletionToClaudeMessage(responseBody) {
-  if (!responseBody?.choices?.[0]) return responseBody;
-  const choice = responseBody.choices[0];
-  const message = choice.message || {};
-  const content = [];
-
-  const reasoning = extractReasoningText(message)
-    || message.provider_specific_fields?.reasoning_content || "";
-  if (reasoning) {
-    content.push({ type: "thinking", thinking: reasoning });
-  }
-  if (typeof message.content === "string" && message.content.length > 0) {
-    content.push({ type: "text", text: message.content });
-  }
-  for (const toolCall of message.tool_calls || []) {
-    const fn = toolCall.function || {};
-    content.push({
-      type: "tool_use",
-      id: toolCall.id || `toolu_${Date.now()}_${content.length}`,
-      name: fn.name || toolCall.name || "",
-      input: parseToolArguments(fn.arguments || toolCall.arguments),
-    });
-  }
-  if (content.length === 0) content.push({ type: "text", text: "" });
-
-  const usage = responseBody.usage || {};
-  const cacheRead = usage.prompt_tokens_details?.cached_tokens || usage.cache_read_input_tokens || 0;
-  const cacheCreate = usage.prompt_tokens_details?.cache_creation_tokens || usage.cache_creation_input_tokens || 0;
-  const promptTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
-  return {
-    id: String(responseBody.id || `msg_${Date.now()}`).replace(/^chatcmpl-/, ""),
-    type: "message",
-    role: "assistant",
-    model: responseBody.model || "unknown",
-    content,
-    stop_reason: fromOpenAIFinish(message.tool_calls?.length ? "tool_calls" : choice.finish_reason, FORMATS.CLAUDE),
-    stop_sequence: null,
-    usage: {
-      input_tokens: Math.max(0, promptTokens - cacheRead - cacheCreate),
-      output_tokens: usage.completion_tokens ?? usage.output_tokens ?? 0,
-      ...(cacheRead > 0 && { cache_read_input_tokens: cacheRead }),
-      ...(cacheCreate > 0 && { cache_creation_input_tokens: cacheCreate }),
-    },
-  };
-}
-
 function textFromResponsesMessageItem(item) {
   if (!item?.content || !Array.isArray(item.content)) return "";
   const byType = item.content.find((c) => c.type === "output_text");

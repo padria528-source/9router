@@ -125,6 +125,7 @@ export async function POST(request) {
     }
 
     if (!existing.providers) existing.providers = {};
+    const existingProvider = existing.providers["9router"] || {};
 
     const normalizedBaseUrl = baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
     let modelList = [];

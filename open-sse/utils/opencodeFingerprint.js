@@ -76,8 +76,32 @@ function chatFunctionOf(tool) {
 function isFingerprintDefinition(tool, key) {
   const def = tool && (chatFunctionOf(tool) || tool);
   const want = FINGERPRINT_TOOL_DEFINITIONS[key];
-  return !!def && def.description === want.description
-    && JSON.stringify(def.parameters) === JSON.stringify(want.parameters);
+  if (!def) return false;
+  if (def.description === want.description
+    && JSON.stringify(def.parameters) === JSON.stringify(want.parameters)) {
+    return true;
+  }
+
+  // Windows / platform variants of OpenCode's tools (issue #5011 / #4971)
+  if (key === "shell") {
+    const desc = typeof def.description === "string" ? def.description : "";
+    const isShellDesc = desc.startsWith("Execute a shell command and return its output.");
+    const hasCommandParam = !!(def.parameters?.properties?.command || def.parameters?.required?.includes("command"));
+    if (isShellDesc && hasCommandParam) {
+      return true;
+    }
+  }
+
+  if (key === "read") {
+    const desc = typeof def.description === "string" ? def.description : "";
+    const isReadDesc = desc.startsWith("Read the contents of a file or directory.");
+    const hasPathParam = !!(def.parameters?.properties?.path || def.parameters?.required?.includes("path"));
+    if (isReadDesc && hasPathParam) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function withToolName(tool, name) {

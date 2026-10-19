@@ -28,6 +28,9 @@ const nextConfig = {
     root: tracingRoot
   },
   outputFileTracingRoot: tracingRoot,
+  outputFileTracingIncludes: {
+    "**/*": ["./src/shared/services/**/*"]
+  },
   outputFileTracingExcludes: {
     "*": ["./gitbook/**/*"]
   },

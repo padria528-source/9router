@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import codexProvider from "../../src/lib/oauth/providers/codex.js";
+import https from "node:https";
+import { EventEmitter } from "node:events";
 
 let mockConnections = [];
 
@@ -170,6 +172,17 @@ describe("OpenAI / Codex Authentication Strategy", () => {
 
   describe("Version Endpoint Metadata", () => {
     it("reports deploymentMode, openaiAuthMethod, and commit", async () => {
+      vi.spyOn(https, "get").mockImplementation((url, options, callback) => {
+        expect(url).toBe("https://registry.npmjs.org/9router/latest");
+        const req = new EventEmitter();
+        queueMicrotask(() => {
+          const res = new EventEmitter();
+          callback(res);
+          res.emit("data", JSON.stringify({ version: "0.0.0" }));
+          res.emit("end");
+        });
+        return req;
+      });
       const { GET: getVersion } = await import("../../src/app/api/version/route.js");
       process.env.GIT_COMMIT = "1234567890abcdef";
       process.env.DEPLOYMENT_MODE = "hosted";

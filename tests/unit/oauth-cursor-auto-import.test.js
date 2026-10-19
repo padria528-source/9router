@@ -21,6 +21,8 @@ describe("GET /api/oauth/cursor/auto-import", () => {
   const setPlatform = (value) => Object.defineProperty(process, "platform", { ...platformDescriptor, value });
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("DEPLOYMENT_MODE", "local");
+    for (const name of ["BASE_URL", "NEXT_PUBLIC_BASE_URL", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_PROJECT_ID", "RAILWAY_SERVICE_ID", "RAILWAY_PUBLIC_DOMAIN"]) vi.stubEnv(name, "");
     dbMock.rows = {};
     dbMock.queries = [];
     dbMock.failOpen = false;

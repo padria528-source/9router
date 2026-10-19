@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { canReadLocalCredentials } from "@/shared/utils/deploymentMode";
 import { NextResponse } from "next/server";
 import {
   getProvider,
@@ -93,6 +94,10 @@ async function completeXaiManualCode(code, state) {
 export async function GET(request, { params }) {
   try {
     const { provider, action } = await params;
+    if (!canReadLocalCredentials() && (["start-proxy", "stop-proxy", "poll-status", "ide-status"].includes(action)
+      || (action === "authorize" && ["codex", "xiaomi-mimo"].includes(provider)))) {
+      return NextResponse.json({ error: "Desktop OAuth is local-only" }, { status: 403 });
+    }
     const { searchParams } = new URL(request.url);
 
     if (action === "authorize") {
@@ -198,7 +203,11 @@ export async function GET(request, { params }) {
       else return NextResponse.json({ error: "Poll only supported for codex/xai/trae/windsurf/zed/xiaomi-mimo" }, { status: 400 });
       if (!session) return NextResponse.json({ status: "unknown" });
       if (session.status === "done" || session.status === "error") {
-        const payload = { ...session };
+        const payload = {
+          status: session.status,
+          ...(session.connectionId ? { connectionId: session.connectionId } : {}),
+          ...(session.status === "error" ? { error: "Authentication failed" } : {}),
+        };
         if (provider === "xiaomi-mimo") {
           // Unlike the others this does not auto-exchange server-side, so a
           // finished session must survive until the client POSTs /exchange —
@@ -301,6 +310,9 @@ export async function GET(request, { params }) {
 export async function POST(request, { params }) {
   try {
     const { provider, action } = await params;
+    if (action === "register-session" && !canReadLocalCredentials()) {
+      return NextResponse.json({ error: "Desktop OAuth is local-only" }, { status: 403 });
+    }
     let body;
     try {
       body = await request.json();
@@ -345,7 +357,7 @@ export async function POST(request, { params }) {
         // to the connection so those models work right after OAuth.
         let passToken = null;
         try {
-          passToken = await readDesktopPassToken();
+          if (canReadLocalCredentials()) passToken = await readDesktopPassToken();
         } catch {
           // Desktop not installed / cookie DB locked — preview models stay unavailable.
         }

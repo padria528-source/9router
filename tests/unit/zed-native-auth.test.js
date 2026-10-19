@@ -25,7 +25,7 @@ import {
 let startZedProxy, stopZedProxy, registerZedSession, getZedSessionStatus, clearZedSession;
 let generateAuthData, exchangeTokens;
 let tempDir;
-const envNames = ["DATA_DIR", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DISABLE_BACKGROUND_TOKEN_REFRESH"];
+const envNames = ["DATA_DIR", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DISABLE_BACKGROUND_TOKEN_REFRESH", "DEPLOYMENT_MODE", "BASE_URL", "NEXT_PUBLIC_BASE_URL"];
 const originalEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
 
 beforeAll(async () => {
@@ -36,6 +36,9 @@ beforeAll(async () => {
   delete process.env.TURSO_DATABASE_URL;
   delete process.env.TURSO_AUTH_TOKEN;
   process.env.DISABLE_BACKGROUND_TOKEN_REFRESH = "true";
+  process.env.DEPLOYMENT_MODE = "local";
+  process.env.BASE_URL = "http://localhost:20128";
+  delete process.env.NEXT_PUBLIC_BASE_URL;
   // Import after DATA_DIR is set: the providers module reaches DB path constants.
   vi.resetModules();
   ({ startZedProxy, stopZedProxy, registerZedSession, getZedSessionStatus, clearZedSession } =
@@ -251,6 +254,17 @@ describe("criterion 6 — register-session failure is distinguishable", () => {
 });
 
 describe("criterion 8 (backend) — re-register creates a fresh session", () => {
+  it("poll exposes only safe fields, not the registered private verifier or result", async () => {
+    registerZedSession({ state: "synthetic-poll", codeVerifier: "synthetic-private-verifier" });
+    const session = getZedSessionStatus("synthetic-poll");
+    Object.assign(session, { status: "done", connectionId: "synthetic-connection", result: { accessToken: "synthetic-access-token" } });
+    const { GET } = await import("@/app/api/oauth/[provider]/[action]/route.js");
+    const res = await GET(new Request("http://localhost/api/oauth/zed/poll-status?state=synthetic-poll"), {
+      params: Promise.resolve({ provider: "zed", action: "poll-status" }),
+    });
+    expect(await res.json()).toEqual({ status: "done", connectionId: "synthetic-connection" });
+    expect(getZedSessionStatus("synthetic-poll")).toBeNull();
+  });
   it("a new register supersedes the old state cleanly", async () => {
     const a = createZedNativeAuthData({}, { nativeAppPort: 1 });
     const b = createZedNativeAuthData({}, { nativeAppPort: 1 });

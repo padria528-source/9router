@@ -3,7 +3,7 @@ import fs from "fs/promises";
 import path from "path";
 import os from "os";
 import { getProviderConnections } from "@/models";
-import { isHosted } from "@/shared/utils/deploymentMode";
+import { canReadLocalCredentials } from "@/shared/utils/deploymentMode";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +53,7 @@ export async function GET() {
     }
 
     // Check local Codex CLI credentials if not hosted and not connected yet
-    if (!connected && !isHosted()) {
+    if (!connected && canReadLocalCredentials()) {
       try {
         const authPath = path.join(os.homedir(), ".codex", "auth.json");
         const raw = await fs.readFile(authPath, "utf-8");

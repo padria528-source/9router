@@ -53,6 +53,18 @@ docs/*
 !docs/ARCHITECTURE.md
 !docs/integrations/
 !docs/integrations/*
+# Adaptive Intelligence Router specifications (other docs remain ignored)
+!docs/prd/
+docs/prd/*
+!docs/prd/ADAPTIVE_INTELLIGENCE_ROUTER_PRD.md
+!docs/plans/
+docs/plans/*
+!docs/plans/ADAPTIVE_INTELLIGENCE_ROUTER_IMPLEMENTATION_PLAN.md
+!docs/architecture/
+docs/architecture/*
+!docs/architecture/ADAPTIVE_ROUTER_ARCHITECTURE.md
+!docs/architecture/ADAPTIVE_ROUTER_PHASE0_AUDIT.md
+!docs/architecture/ADAPTIVE_ROUTER_PHASE02_READINESS.md
 test/*
 open-sse/test/*
 RM.vn.md

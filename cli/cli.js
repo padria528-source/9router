@@ -637,6 +637,7 @@ function startServer(updatePromise) {
       windowsHide: true,
       env: {
         ...buildEnvWithRuntime(process.env),
+        DEPLOYMENT_MODE: process.env.DEPLOYMENT_MODE ?? "local",
         PORT: port.toString(),
         HOSTNAME: host
       }

@@ -115,3 +115,12 @@ graphify-out/*
 .start-dev.ps1
 start-dev-silent.cjs
 debug.log
+
+# Cloudflare / OpenNext
+/.open-next/
+.open-next
+/.wrangler/
+.wrangler
+
+# Local sensitive / temp files
+Untitled*

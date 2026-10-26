@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: 9router
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 20128
+      - key: HOSTNAME
+        value: 0.0.0.0
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /app/data
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: INITIAL_PASSWORD
+        sync: false
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false

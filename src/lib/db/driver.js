@@ -1,8 +1,20 @@
 import { ensureDirs, DATA_FILE } from "./paths.js";
 
+const RETRY_COOLDOWN_MS = 2000;
+
 // Use global to survive Next.js dev hot-reload (module state resets on reload)
-if (!global._dbAdapter) global._dbAdapter = { instance: null, initPromise: null, logged: false };
-const state = global._dbAdapter;
+function getState() {
+  if (!global._dbAdapter) {
+    global._dbAdapter = {
+      instance: null,
+      initPromise: null,
+      initError: null,
+      lastFailedAt: null,
+      logged: false,
+    };
+  }
+  return global._dbAdapter;
+}
 
 async function tryBunSqlite() {
   // Bun runtime only — built-in, no install needed
@@ -94,6 +106,7 @@ async function initAdapter() {
 
   const adapter = await maybeWrapWithTurso(localAdapter);
 
+  const state = getState();
   if (!state.logged) {
     const suffix = adapter.driver === "turso-mirror"
       ? ` | local: ${localAdapter.driver} | remote persistence: Turso`
@@ -106,17 +119,54 @@ async function initAdapter() {
 }
 
 export async function getAdapter() {
+  const state = getState();
   if (state.instance) return state.instance;
-  if (!state.initPromise) {
-    state.initPromise = initAdapter().then((a) => {
-      state.instance = a;
-      return a;
-    });
+  if (state.initPromise) return state.initPromise;
+
+  // Enforce cooldown backoff so failures do not spin in tight retry loops
+  const now = Date.now();
+  if (state.initError && state.lastFailedAt && (now - state.lastFailedAt) < RETRY_COOLDOWN_MS) {
+    throw state.initError;
   }
+
+  state.initPromise = initAdapter()
+    .then((a) => {
+      state.instance = a;
+      state.initError = null;
+      state.lastFailedAt = null;
+      return a;
+    })
+    .catch((err) => {
+      state.initError = err;
+      state.lastFailedAt = Date.now();
+      state.initPromise = null;
+      throw err;
+    });
+
   return state.initPromise;
 }
 
+export function getDatabaseStatus() {
+  const state = getState();
+  if (state.instance) {
+    try {
+      state.instance.get("SELECT 1 AS ok");
+      return { ready: true, status: "ready" };
+    } catch {
+      return { ready: false, status: "error" };
+    }
+  }
+  if (state.initPromise) {
+    return { ready: false, status: "initializing" };
+  }
+  if (state.initError) {
+    return { ready: false, status: "failed" };
+  }
+  return { ready: false, status: "uninitialized" };
+}
+
 export function getAdapterSync() {
+  const state = getState();
   if (!state.instance) throw new Error("[DB] adapter not initialized — await getAdapter() first");
   return state.instance;
 }

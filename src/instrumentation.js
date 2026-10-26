@@ -10,5 +10,11 @@ export async function register() {
 
     const { startModelCatalogSync } = await import("@/lib/modelCatalog/sync.js");
     startModelCatalogSync();
+
+    // Bootstrap database adapter eagerly so it's ready before traffic arrives
+    const { getAdapter } = await import("@/lib/db/driver.js");
+    getAdapter().catch((err) => {
+      console.error("[DB] Background startup initialization failed:", err?.message || err);
+    });
   }
 }

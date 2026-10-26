@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
-import { isHosted } from "@/shared/utils/deploymentMode";
+import { canReadLocalCredentials } from "@/shared/utils/deploymentMode";
 import { createProviderConnection, getProviderConnections } from "@/models";
 import { extractCodexAccountInfo } from "@/lib/oauth/providers";
 
@@ -13,7 +13,7 @@ import { extractCodexAccountInfo } from "@/lib/oauth/providers";
  */
 export async function POST() {
   try {
-    if (isHosted()) {
+    if (!canReadLocalCredentials()) {
       return NextResponse.json(
         {
           success: false,

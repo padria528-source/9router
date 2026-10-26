@@ -22,3 +22,5 @@ tests/unit/translator-request-normalization.test.js :: request normalization cla
 tests/unit/translator-request-normalization.test.js :: request normalization filterToOpenAIFormat flattens text-only arrays to string
 tests/unit/translator-request-normalization.test.js :: request normalization parseSSELine supports provider raw NDJSON stream lines
 tests/unit/translator-request-normalization.test.js :: request normalization translateRequest keeps /v1/messages Claude->OpenAI text payloads string-safe
+tests/unit/xai-oauth-service.test.js :: xai/oauth service generates dashboard auth data with CLIProxyAPI PKCE size and discovered endpoints
+tests/unit/xai-oauth-service.test.js :: xai/oauth service exchanges dashboard codes against the discovered xAI token endpoint

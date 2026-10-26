@@ -321,6 +321,17 @@ function buildCliPackage() {
     console.log("⏭️  No updater files found\n");
   }
 
+  // Step 7c: Copy shared services (dynamic imports like quotaPingSchedule missed by Next.js tracing)
+  console.log("7️⃣ c Copying shared services...");
+  const servicesSrc = path.join(appDir, "src", "shared", "services");
+  const servicesDest = path.join(cliAppDir, "src", "shared", "services");
+  if (fs.existsSync(servicesSrc)) {
+    copyRecursive(servicesSrc, servicesDest);
+    console.log("✅ Copied shared services\n");
+  } else {
+    console.log("⏭️  No shared services found\n");
+  }
+
   // Step 8: Build MITM server (config driven - see app/cli/scripts/buildMitm.js)
   console.log("8️⃣  Building MITM server...");
   try {

@@ -110,7 +110,11 @@ describe("cline-free namespace pricing", () => {
   it("still bills the paid twin at its published rate", async () => {
     const { getPricingForModel } = await import("../../open-sse/providers/pricing.js");
     expect(getPricingForModel("cline", "deepseek/deepseek-v4.1-flash").input).toBe(0.14);
-    expect(getPricingForModel("cline", "meta/muse-spark-1.3-contributor")).toBeNull();
+    // The stable Muse catalog now publishes the paid contributor rate; the
+    // cline-free namespace must remain zero without zeroing this paid twin.
+    expect(getPricingForModel("cline", "meta/muse-spark-1.3-contributor")).toMatchObject({
+      input: 0.10, output: 0.20, cached: 0.002, reasoning: 0.20, cache_creation: 0,
+    });
   });
 
   it("zero price survives cost calculation over a large usage", async () => {

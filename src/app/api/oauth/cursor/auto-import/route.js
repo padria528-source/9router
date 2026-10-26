@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { canReadLocalCredentials } from "@/shared/utils/deploymentMode";
 import { access, constants } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
@@ -78,7 +79,7 @@ const normalize = (value) => {
  */
 function extractTokensViaBetterSqlite(dbPath) {
   // Dynamic require so the route stays importable even if native bindings fail
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+
   const Database = require("better-sqlite3");
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
 
@@ -175,6 +176,9 @@ async function extractTokensViaCLI(dbPath) {
  * Strategy: better-sqlite3 → sqlite3 CLI → manual fallback
  */
 export async function GET() {
+  if (!canReadLocalCredentials()) {
+    return NextResponse.json({ found: false, error: "Credential import requires an unambiguous local deployment" }, { status: 403 });
+  }
   try {
     const platform = process.platform;
     const candidates = getCandidatePaths(platform);

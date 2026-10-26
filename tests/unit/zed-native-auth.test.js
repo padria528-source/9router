@@ -1,5 +1,7 @@
 // Acceptance suite for the Zed native-app auth fix.
-// RUN WITH AN ISOLATED DB:  DATA_DIR=$(mktemp -d) npx vitest run unit/zed-native-auth.test.js
+// Self-isolating: DATA_DIR points at a temp dir before the DB layer loads,
+// so criterion 3's connection save never reaches the real ~/.9router DB or Turso.
+// The suite creates and closes its own temporary DB, including when run directly.
 //
 // Covers criteria:
 //   1. Zed proxy starts
@@ -9,24 +11,54 @@
 //   5. systemId identical authorize → exchange → stored connection
 //   6. register-session failure is distinguishable (backend contract)
 //   8. (backend) reopen/re-register creates a fresh session
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { closeTestDb } from "../helpers/test-db.js";
 import {
   createZedNativeAuthData,
   parseZedCallbackPayload,
   decryptZedAccessToken,
 } from "open-sse/shared/zedAuth.js";
-import {
-  startZedProxy,
-  stopZedProxy,
-  registerZedSession,
-  getZedSessionStatus,
-  clearZedSession,
-} from "@/lib/oauth/utils/server.js";
-import {
-  generateAuthData,
-  exchangeTokens,
-} from "@/lib/oauth/providers/index.js";
+let startZedProxy, stopZedProxy, registerZedSession, getZedSessionStatus, clearZedSession;
+let generateAuthData, exchangeTokens;
+let tempDir;
+const envNames = ["DATA_DIR", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "DISABLE_BACKGROUND_TOKEN_REFRESH", "DEPLOYMENT_MODE", "BASE_URL", "NEXT_PUBLIC_BASE_URL"];
+const originalEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+
+beforeAll(async () => {
+  const testRoot = process.env.NINE_ROUTER_TEST_DATA_ROOT || os.tmpdir();
+  fs.mkdirSync(testRoot, { recursive: true });
+  tempDir = fs.mkdtempSync(path.join(testRoot, "9router-zed-native-"));
+  process.env.DATA_DIR = tempDir;
+  delete process.env.TURSO_DATABASE_URL;
+  delete process.env.TURSO_AUTH_TOKEN;
+  process.env.DISABLE_BACKGROUND_TOKEN_REFRESH = "true";
+  process.env.DEPLOYMENT_MODE = "local";
+  process.env.BASE_URL = "http://localhost:20128";
+  delete process.env.NEXT_PUBLIC_BASE_URL;
+  // Import after DATA_DIR is set: the providers module reaches DB path constants.
+  vi.resetModules();
+  ({ startZedProxy, stopZedProxy, registerZedSession, getZedSessionStatus, clearZedSession } =
+    await import("@/lib/oauth/utils/server.js"));
+  ({ generateAuthData, exchangeTokens } = await import("@/lib/oauth/providers/index.js"));
+// Cold-loading the complete OAuth registry can exceed Vitest's 10s hook default on Windows.
+}, 30000);
+
+afterAll(() => {
+  stopZedProxy?.();
+  closeTestDb();
+  try {
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  } finally {
+    for (const name of envNames) {
+      if (originalEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = originalEnv[name];
+    }
+  }
+});
 
 const realFetch = globalThis.fetch;
 
@@ -222,6 +254,17 @@ describe("criterion 6 — register-session failure is distinguishable", () => {
 });
 
 describe("criterion 8 (backend) — re-register creates a fresh session", () => {
+  it("poll exposes only safe fields, not the registered private verifier or result", async () => {
+    registerZedSession({ state: "synthetic-poll", codeVerifier: "synthetic-private-verifier" });
+    const session = getZedSessionStatus("synthetic-poll");
+    Object.assign(session, { status: "done", connectionId: "synthetic-connection", result: { accessToken: "synthetic-access-token" } });
+    const { GET } = await import("@/app/api/oauth/[provider]/[action]/route.js");
+    const res = await GET(new Request("http://localhost/api/oauth/zed/poll-status?state=synthetic-poll"), {
+      params: Promise.resolve({ provider: "zed", action: "poll-status" }),
+    });
+    expect(await res.json()).toEqual({ status: "done", connectionId: "synthetic-connection" });
+    expect(getZedSessionStatus("synthetic-poll")).toBeNull();
+  });
   it("a new register supersedes the old state cleanly", async () => {
     const a = createZedNativeAuthData({}, { nativeAppPort: 1 });
     const b = createZedNativeAuthData({}, { nativeAppPort: 1 });

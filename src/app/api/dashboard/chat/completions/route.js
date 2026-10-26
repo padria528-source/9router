@@ -1,16 +1,38 @@
 import { handleChat } from "@/sse/handlers/chat.js";
 import { executeMode } from "@/modes/orchestrator.js";
+import { NextRequest } from "next/server";
+import { getApiKeys, getSettings } from "@/lib/localDb";
+import { getDashboardAuthSession } from "@/lib/auth/dashboardSession.js";
+
+// Browser requests authenticate to the dashboard with a session cookie. Only a
+// verified session may use an existing server-held key for the internal pipeline.
+async function completionHeaders(request) {
+  const headers = new Headers(request.headers);
+  headers.set("Content-Type", "application/json");
+  headers.delete("cookie");
+  if (headers.has("authorization") || headers.has("x-api-key")) return { headers };
+  if (!(await getSettings()).requireApiKey) return { headers };
+
+  const token = new NextRequest(request.url, { headers: request.headers })
+    .cookies.get("auth_token")?.value;
+  const session = await getDashboardAuthSession(token);
+  if (session?.authenticated !== true) {
+    return { status: 401, error: "Dashboard authentication required" };
+  }
+  const key = (await getApiKeys()).find((entry) => entry.isActive && entry.key)?.key;
+  if (!key) return { status: 503, error: "No active API key configured" };
+  headers.set("Authorization", `Bearer ${key}`);
+  return { headers };
+}
 
 /**
  * Internal helper to run a completion using 9Router's full pipeline
  * (fallback, translation, retries, secrets scrubbing).
  */
-async function internalChatCompletion({ model, messages, temperature, maxTokens, signal }) {
+async function internalChatCompletion({ model, messages, temperature, maxTokens, signal }, headers) {
   const req = new Request("http://localhost:20128/v1/chat/completions", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify({
       model,
       messages,
@@ -45,12 +67,17 @@ export async function POST(request) {
   }
 
   const mode = String(body.mode || "tunggal").toLowerCase();
+  const auth = await completionHeaders(request);
+  if (auth.error) {
+    return Response.json({ error: { message: auth.error } }, { status: auth.status });
+  }
+  const chatCompletionFn = (options) => internalChatCompletion(options, auth.headers);
 
   // Mode "tunggal" delegates directly to handleChat (supports standard SSE or JSON)
   if (mode === "tunggal" || mode === "single") {
     const forwardRequest = new Request(request.url, {
       method: "POST",
-      headers: request.headers,
+      headers: auth.headers,
       body: JSON.stringify(body),
       signal: request.signal,
     });
@@ -77,7 +104,7 @@ export async function POST(request) {
             ...body,
             signal: request.signal,
             onEvent: (ev) => sendEvent(ev),
-            chatCompletionFn: internalChatCompletion,
+            chatCompletionFn,
           });
 
           // Final event with aggregated content
@@ -114,7 +141,7 @@ export async function POST(request) {
   const result = await executeMode({
     ...body,
     signal: request.signal,
-    chatCompletionFn: internalChatCompletion,
+    chatCompletionFn,
   });
 
   return new Response(

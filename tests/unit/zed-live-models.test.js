@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
+import { closeTestDb } from "../helpers/test-db.js";
 
 // Transport stub BELOW resolveZedModels: proxyAwareFetch captures the native
 // fetch at import time, so stubbing globalThis.fetch cannot intercept it.
@@ -75,18 +76,21 @@ afterEach(() => {
 
 // Imports must be dynamic so DATA_DIR is set before the DB layer loads.
 const originalDataDir = process.env.DATA_DIR;
+let tempDir;
 let GET;
 let createProviderConnection;
 
 beforeAll(async () => {
-  process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "9router-zed-live-"));
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-zed-live-"));
+  process.env.DATA_DIR = tempDir;
   vi.resetModules();
   ({ GET } = await import("@/app/api/providers/[id]/models/route.js"));
   ({ createProviderConnection } = await import("@/models/index.js"));
 });
 
 afterAll(() => {
-  fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
+  closeTestDb();
+  if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;
 });

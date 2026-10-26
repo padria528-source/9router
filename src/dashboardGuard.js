@@ -3,6 +3,7 @@ import { getSettings, validateApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
 import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
+import { canReadLocalCredentials } from "@/shared/utils/deploymentMode";
 
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const CLI_TOKEN_SALT = "9r-cli-auth";
@@ -46,6 +47,8 @@ const ALWAYS_PROTECTED = [
   "/api/oauth/cursor/auto-import",
   "/api/oauth/kiro/auto-import",
   "/api/oauth/zed/auto-import",
+  "/api/oauth/codex/auto-import",
+  "/api/oauth/xiaomi-mimo/auto-import",
 ];
 
 // Require auth, but allow through if requireLogin is disabled
@@ -83,6 +86,8 @@ const LOCAL_ONLY_PATHS = [
   "/api/oauth/cursor/auto-import",
   "/api/oauth/kiro/auto-import",
   "/api/oauth/zed/auto-import",
+  "/api/oauth/codex/auto-import",
+  "/api/oauth/xiaomi-mimo/auto-import",
   "/api/auth/reset-password",
   "/api/headroom/start",
   "/api/headroom/stop",
@@ -206,6 +211,22 @@ export const __test__ = {
 
 export async function proxy(request) {
   const { pathname } = request.nextUrl;
+
+  // Hosting restrictions precede JWT/CLI authentication; neither grants host-secret access.
+  const credentialImport = /^\/api\/oauth\/[^/]+\/auto-import(?:\/|$)/.test(pathname);
+  const desktopOAuth = /^\/api\/oauth\/[^/]+\/(start-proxy|stop-proxy|register-session|poll-status|ide-status)(?:\/|$)/.test(pathname)
+    || /^\/api\/oauth\/(codex|xiaomi-mimo)\/authorize$/.test(pathname);
+  const localMimoExchange = pathname === "/api/oauth/xiaomi-mimo/exchange" && canReadLocalCredentials();
+  if ((credentialImport || desktopOAuth) && !canReadLocalCredentials()) {
+    return NextResponse.json({ error: "Local-only authentication is unavailable on hosted or ambiguous deployments" }, { status: 403 });
+  }
+
+  if (desktopOAuth || localMimoExchange) {
+    if (!isLocalRequest(request) || !(await hasValidCliToken(request) || await hasValidToken(request))) {
+      return NextResponse.json({ error: "Desktop OAuth requires an authenticated local caller" }, { status: 403 });
+    }
+    return NextResponse.next();
+  }
 
   // Local-only gate for spawn-capable / host-secret routes.
   if (LOCAL_ONLY_PATHS.some((p) => pathname.startsWith(p))) {

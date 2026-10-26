@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { canReadLocalCredentials } from "@/shared/utils/deploymentMode";
 import { readFile, readdir } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
@@ -10,6 +11,9 @@ import { join } from "path";
  * linked client registration file so token refresh works.
  */
 export async function GET() {
+  if (!canReadLocalCredentials()) {
+    return NextResponse.json({ found: false, error: "Credential import requires an unambiguous local deployment" }, { status: 403 });
+  }
   try {
     const cachePath = join(homedir(), ".aws/sso/cache");
 

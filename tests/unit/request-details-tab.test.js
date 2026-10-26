@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { closeTestDb } from "../helpers/test-db.js";
 
 const originalDataDir = process.env.DATA_DIR;
 let tempDir;
@@ -22,13 +23,14 @@ beforeAll(async () => {
   vi.resetModules();
   db = await import("@/lib/db/index.js");
   await db.initDb();
-  await db.updateSettings({ enableObservability2: true, observabilityBatchSize: 1 });
+  await db.updateSettings({ enableObservability: true, observabilityBatchSize: 1 });
 
   const { getAdapter } = await import("@/lib/db/driver.js");
   adapter = await getAdapter();
 });
 
 afterAll(() => {
+  closeTestDb();
   if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
   if (originalDataDir === undefined) delete process.env.DATA_DIR;
   else process.env.DATA_DIR = originalDataDir;

@@ -7,7 +7,7 @@
  *   - a finished session survives /poll-status until /exchange consumes it
  *   - a failed session is cleaned up by /poll-status itself
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("next/server", () => ({
   NextResponse: {
@@ -86,9 +86,13 @@ const exchange = (state) =>
 
 describe("xiaomi-mimo OAuth session lifecycle", () => {
   beforeEach(() => {
+    vi.stubEnv("DEPLOYMENT_MODE", "local");
+    for (const name of ["BASE_URL", "NEXT_PUBLIC_BASE_URL", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_PROJECT_ID", "RAILWAY_SERVICE_ID", "RAILWAY_PUBLIC_DOMAIN"]) vi.stubEnv(name, "");
     sessions.clear();
     stopped.count = 0;
   });
+
+  afterEach(() => vi.unstubAllEnvs());
 
   it("keeps a finished session alive so /exchange can consume it", async () => {
     sessions.set("st1", { status: "done", result: { uid: "u1", accessToken: "sk-x", baseUrl: "https://api.xiaomimimo.com/v1" } });
@@ -96,6 +100,8 @@ describe("xiaomi-mimo OAuth session lifecycle", () => {
     const poll = await get("poll-status", "st1");
     expect(poll.status).toBe(200);
     expect(await poll.json()).toMatchObject({ status: "done" });
+    expect(JSON.stringify(await poll.json())).not.toContain("sk-x");
+    expect((await poll.json()).result).toBeUndefined();
 
     // The bug: this used to be gone, making /exchange always 400.
     expect(sessions.has("st1")).toBe(true);
@@ -131,6 +137,32 @@ describe("xiaomi-mimo OAuth session lifecycle", () => {
     expect(arg.provider).toBe("xiaomi-mimo");
     expect(arg.providerSpecificData.mimoPassToken).toBe("pt-abc");
     expect(arg.providerSpecificData.mimoUserId).toBe("u1");
+  });
+
+  it("does not attach host Desktop credentials when exchange runs on a hosted deployment", async () => {
+    vi.stubEnv("DEPLOYMENT_MODE", "hosted");
+    const { readDesktopPassToken } = await import("open-sse/shared/mimoAccount.js");
+    const { createProviderConnection } = await import("@/models");
+    readDesktopPassToken.mockClear();
+    sessions.set("hosted", { status: "done", result: { uid: "u1", accessToken: "synthetic-session-token" } });
+    const res = await exchange("hosted");
+    expect(res.status).toBe(200);
+    expect(createProviderConnection.mock.calls.at(-1)[0].providerSpecificData.mimoPassToken).toBeNull();
+    expect(readDesktopPassToken).not.toHaveBeenCalled();
+  });
+
+  it.each(["authorize", "start-proxy", "stop-proxy", "poll-status", "ide-status"])("denies hosted Desktop action %s before side effects", async (action) => {
+    vi.stubEnv("DEPLOYMENT_MODE", "hosted");
+    const res = await get(action, "synthetic-state");
+    expect(res.status).toBe(403);
+  });
+
+  it("denies hosted register-session before parsing or creating a session", async () => {
+    vi.stubEnv("DEPLOYMENT_MODE", "hosted");
+    const res = await POST(new Request("http://localhost/api/oauth/zed/register-session", { method: "POST" }), {
+      params: Promise.resolve({ provider: "zed", action: "register-session" }),
+    });
+    expect(res.status).toBe(403);
   });
 
   it("still reports unknown for an unregistered state", async () => {

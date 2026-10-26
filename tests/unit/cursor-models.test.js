@@ -1,11 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
+
+const { connectMock } = vi.hoisted(() => ({ connectMock: vi.fn() }));
+vi.mock("http2", () => ({ default: { connect: connectMock } }));
+
 import {
   clearCursorModelCache,
   parseCursorUsableModels,
   resolveCursorModels,
 } from "../../open-sse/services/cursorModels.js";
 
-const originalFetch = global.fetch;
+function mockHttp2Response(payload, status = 200) {
+  const request = new EventEmitter();
+  request.end = vi.fn(() => {
+    queueMicrotask(() => {
+      request.emit("response", { ":status": status });
+      request.emit("data", Buffer.from(payload));
+      request.emit("end");
+    });
+  });
+  const client = new EventEmitter();
+  client.request = vi.fn(() => request);
+  client.close = vi.fn();
+  connectMock.mockReturnValue(client);
+  return { client, request };
+}
 
 function varint(value) {
   const bytes = [];
@@ -43,10 +62,11 @@ function model(id, name) {
 describe("Cursor live model catalog", () => {
   beforeEach(() => {
     clearCursorModelCache();
+    connectMock.mockReset();
+    connectMock.mockImplementation(() => { throw new Error("Unexpected HTTP/2 request in isolated test"); });
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
     clearCursorModelCache();
   });
 
@@ -65,7 +85,7 @@ describe("Cursor live model catalog", () => {
 
   it("fetches the account-specific catalog and caches it", async () => {
     const payload = concat(model("claude-4.6-opus", "Claude 4.6 Opus"));
-    global.fetch = vi.fn().mockResolvedValue(new Response(payload, { status: 200 }));
+    const { client, request } = mockHttp2Response(payload);
     const credentials = {
       accessToken: "cursor-token",
       providerSpecificData: { machineId: "machine-id" },
@@ -78,22 +98,21 @@ describe("Cursor live model catalog", () => {
       models: [{ id: "claude-4.6-opus", name: "Claude 4.6 Opus" }],
     });
 
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(global.fetch).toHaveBeenCalledWith(
-      "https://agent.api5.cursor.sh/agent.v1.AgentService/GetUsableModels",
+    expect(connectMock).toHaveBeenCalledExactlyOnceWith("https://agent.api5.cursor.sh");
+    expect(client.request).toHaveBeenCalledWith(
       expect.objectContaining({
-        method: "POST",
-        body: expect.any(Uint8Array),
-        headers: expect.objectContaining({
-          "content-type": "application/proto",
-          accept: "application/proto",
-        }),
+        ":method": "POST",
+        ":path": "/agent.v1.AgentService/GetUsableModels",
+        "content-type": "application/proto",
+        accept: "application/proto",
       }),
     );
+    expect(request.end).toHaveBeenCalledWith(undefined);
+    expect(client.close).toHaveBeenCalledTimes(1);
   });
 
   it("fails open when the Cursor catalog request fails", async () => {
-    global.fetch = vi.fn().mockResolvedValue(new Response("no", { status: 403 }));
+    mockHttp2Response(Buffer.from("no"), 403);
 
     await expect(resolveCursorModels({
       accessToken: "cursor-token",

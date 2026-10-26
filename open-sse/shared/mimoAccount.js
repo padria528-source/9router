@@ -192,8 +192,7 @@ async function acquireViaDesktopPhases(passJar, proxyOptions, apiBase, sid) {
   if (!j || typeof j.code !== "number" || j.code !== 0 || !j.location || !j.nonce || !j.ssecurity) {
     failLog(
       `phase1 sid=${sid} http=${p1.status} code=${j?.code ?? "?"} hasLoc=${!!j?.location}`
-      + ` secondValidation=${j?.bSecondValidation ?? "?"} notificationUrl=${j?.notificationUrl ? "present" : "no"}`
-      + ` body=${JSON.stringify(raw.slice(0, 200))}`,
+      + ` secondValidation=${j?.bSecondValidation ?? "?"} notificationUrl=${j?.notificationUrl ? "present" : "no"}`,
     );
     return null;
   }
@@ -245,7 +244,7 @@ async function getServiceCookie(providerSpecificData, proxyOptions) {
   const apiBase = resolveMimoServerBase(providerSpecificData);
   const passJar = providerSpecificData?.mimoPassToken
     ? { passToken: providerSpecificData.mimoPassToken, userId: providerSpecificData.mimoUserId, cUserId: providerSpecificData.mimoCUserId }
-    : await readDesktopAccountCookies();
+    : null; // Host cookies are imported explicitly, never borrowed by a connection.
   if (!passJar) return { cookie: null, reason: "no-pass-token" };
 
   // One cached session per passToken+cluster — accounts/connections rotate
@@ -269,7 +268,7 @@ async function getServiceCookie(providerSpecificData, proxyOptions) {
     try {
       return await acquireServiceCookie(passJar, proxyOptions, apiBase, providerSpecificData?.region);
     } catch (e) {
-      console.log(`[mimoAccount] acquire threw: ${e?.message || e} | ${String(e?.stack || "").split("\n").slice(1, 4).join(" <- ")}`);
+      console.log("[mimoAccount] session acquisition failed");
       return null; // network/parse failure — callers degrade, never throw
     } finally {
       _inflight.delete(key);
@@ -301,7 +300,7 @@ export async function getMimoAccountCookie(providerSpecificData = null, proxyOpt
     const { cookie } = await getServiceCookie(providerSpecificData, proxyOptions);
     return cookie;
   } catch (e) {
-    console.log(`[mimoAccount] getMimoAccountCookie threw: ${e?.message || e} | ${String(e?.stack || "").split("\n").slice(1, 4).join(" <- ")}`);
+    console.log("[mimoAccount] session lookup failed");
     return null;
   }
 }
@@ -326,6 +325,6 @@ export async function getMimoAccountUsage(providerSpecificData = null, proxyOpti
     if (!data || data.code !== 0 || !data.data) return { error: "bad-response" };
     return { percent: data.data.percent, resetDate: data.data.resetDate, resetAt: data.data.resetAt };
   } catch (e) {
-    return { error: e.message };
+    return { error: "session-failed" };
   }
 }

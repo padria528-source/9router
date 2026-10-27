@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import initSqlJs from "sql.js";
 import { PRAGMA_SQL } from "../schema.js";
 
@@ -6,13 +7,49 @@ let SQL = null;
 
 async function loadSql() {
   if (SQL) return SQL;
-  SQL = await initSqlJs();
+  const options = {};
+
+  try {
+    const rootDir = process.cwd().endsWith("tests") ? path.resolve(process.cwd(), "..") : process.cwd();
+    const candidatePaths = [
+      path.resolve(rootDir, "node_modules/sql.js/dist/sql-wasm.wasm"),
+      path.resolve(rootDir, ".open-next/server-functions/default/sql-wasm.wasm"),
+      path.resolve(rootDir, "public/sql-wasm.wasm"),
+    ];
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        options.wasmBinary = fs.readFileSync(p);
+        break;
+      }
+    }
+  } catch {}
+
+  // In serverless / worker runtime where local wasm is unavailable, fetch wasm binary into Uint8Array
+  if (!options.wasmBinary && typeof fetch === "function") {
+    try {
+      const res = await fetch("https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.14.1/sql-wasm.wasm");
+      if (res.ok) {
+        const ab = await res.arrayBuffer();
+        options.wasmBinary = new Uint8Array(ab);
+      }
+    } catch {}
+  }
+
+  SQL = await initSqlJs(options);
   return SQL;
 }
 
 export async function createSqlJsAdapter(filePath) {
   const SQLLib = await loadSql();
-  const buf = fs.existsSync(filePath) ? fs.readFileSync(filePath) : null;
+  let buf = null;
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      buf = fs.readFileSync(filePath);
+    }
+  } catch {
+    // In-memory fallback (e.g. Cloudflare Workers)
+    buf = null;
+  }
   const db = new SQLLib.Database(buf);
   db.exec(PRAGMA_SQL);
   // Schema is created/synced by migrate.js after adapter init
@@ -22,9 +59,15 @@ export async function createSqlJsAdapter(filePath) {
   const SAVE_DEBOUNCE_MS = 100;
 
   function persist() {
-    const data = db.export();
-    fs.writeFileSync(filePath, Buffer.from(data));
-    dirty = false;
+    if (!filePath) return;
+    try {
+      const data = db.export();
+      fs.writeFileSync(filePath, Buffer.from(data));
+      dirty = false;
+    } catch {
+      // Ephemeral / serverless runtime: persistence handled by remote database
+      dirty = false;
+    }
   }
 
   function scheduleSave() {

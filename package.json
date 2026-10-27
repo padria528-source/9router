@@ -7,7 +7,7 @@
     "dev": "next dev --port 20127",
     "dev:webpack": "next dev --webpack --port 20127",
     "build": "next build --webpack",
-    "build:worker": "opennextjs-cloudflare build",
+    "build:worker": "node scripts/prepare-worker.mjs && opennextjs-cloudflare build",
     "deploy:worker": "opennextjs-cloudflare deploy",
     "preview:worker": "opennextjs-cloudflare preview",
     "postbuild": "node scripts/copy-standalone-assets.mjs",

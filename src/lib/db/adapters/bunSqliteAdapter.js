@@ -6,7 +6,8 @@ const CHECKPOINT_INTERVAL_MS = 60 * 1000;
 
 export async function createBunSqliteAdapter(filePath) {
   // Dynamic import — only resolves under Bun runtime
-  const { Database } = await import("bun:sqlite");
+  const loadBunSqlite = new Function('return import("bun:sqlite")');
+  const { Database } = await loadBunSqlite();
   const db = new Database(filePath, { create: true });
   db.exec(PRAGMA_SQL);
 

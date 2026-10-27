@@ -17,12 +17,16 @@ const KEEP_BACKUPS = 3;
 const BACKUP_EXCLUDE_TABLES = ["requestDetails"];
 
 export function makeBackupDir(label) {
-  ensureDirs();
-  const ver = getAppVersion();
-  const slug = `${label}-${ver}-${timestampSlug()}`;
-  const dir = path.join(BACKUPS_DIR, slug);
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
+  try {
+    ensureDirs();
+    const ver = getAppVersion();
+    const slug = `${label}-${ver}-${timestampSlug()}`;
+    const dir = path.join(BACKUPS_DIR, slug);
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  } catch {
+    return null;
+  }
 }
 
 export function backupFile(srcPath, destDir, destName = null) {
@@ -63,13 +67,15 @@ export function backupDbLite(adapter, destDir, destName = "data.sqlite") {
 }
 
 export function pruneOldBackups() {
-  if (!fs.existsSync(BACKUPS_DIR)) return;
-  const entries = fs.readdirSync(BACKUPS_DIR, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => ({ name: e.name, full: path.join(BACKUPS_DIR, e.name), mtime: fs.statSync(path.join(BACKUPS_DIR, e.name)).mtimeMs }))
-    .sort((a, b) => b.mtime - a.mtime);
+  try {
+    if (!fs.existsSync(BACKUPS_DIR)) return;
+    const entries = fs.readdirSync(BACKUPS_DIR, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => ({ name: e.name, full: path.join(BACKUPS_DIR, e.name), mtime: fs.statSync(path.join(BACKUPS_DIR, e.name)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
 
-  for (const old of entries.slice(KEEP_BACKUPS)) {
-    try { fs.rmSync(old.full, { recursive: true, force: true }); } catch {}
-  }
+    for (const old of entries.slice(KEEP_BACKUPS)) {
+      try { fs.rmSync(old.full, { recursive: true, force: true }); } catch {}
+    }
+  } catch {}
 }

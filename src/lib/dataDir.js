@@ -30,7 +30,8 @@ export function getDataDir() {
       console.warn(`[DATA_DIR] '${configured}' not writable → fallback ~/.${APP_NAME}`);
       return defaultDir();
     }
-    throw e;
+    // Serverless/workerd runtime fallback
+    return configured;
   }
 }
 

@@ -53,6 +53,8 @@ docs/*
 !docs/ARCHITECTURE.md
 !docs/integrations/
 !docs/integrations/*
+!docs/deployment/
+!docs/deployment/*
 # Adaptive Intelligence Router specifications (other docs remain ignored)
 !docs/prd/
 docs/prd/*
@@ -124,3 +126,4 @@ debug.log
 
 # Local sensitive / temp files
 Untitled*
+/public/sql-wasm.wasm

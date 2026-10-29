@@ -39,7 +39,9 @@ describe("provider baseUrl const (full path, no trailing slash)", () => {
   });
 });
 
-describe("antigravity bounded retry (429=3, 503=3)", () => {
+// 429 was 6 after the June registry migration; the maintainer lowered it to 3 in
+// 3f9382de ("Fix AG, Kiro, Xiaomi Provider"); it has been 3 since.
+describe("antigravity retry (429=3, 503=3)", () => {
   it("429 attempts = 3", () => {
     expect(antigravity.transport.retry["429"].attempts).toBe(3);
   });

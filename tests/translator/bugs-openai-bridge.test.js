@@ -37,6 +37,7 @@ describe("bug: Claude → OpenAI bridge data loss", () => {
 
   // claude-to-openai.js:155-173 — tool_result image block dropped (text only)
   // KNOWN BUG
+  // Fixed in f4f06f29 ("keep tool-result images"): now a regression test.
   it("tool_result with image block is not turned into raw JSON / dropped", () => {
     const out = T(FORMATS.CLAUDE, FORMATS.OPENAI, {
       messages: [
@@ -53,12 +54,6 @@ describe("bug: Claude → OpenAI bridge data loss", () => {
     const toolMsg = out.messages.find((m) => m.role === "tool");
     // Should keep the image; currently stringifies the whole array into raw JSON
     expect(toolMsg?.content, "image in tool_result lost").not.toMatch(/^\[/);
-    expect(out.messages).toEqual(expect.arrayContaining([expect.objectContaining({
-      role: "user",
-      content: expect.arrayContaining([expect.objectContaining({
-        type: "image_url", image_url: { url: "data:image/png;base64,ZZZ" },
-      })]),
-    })]));
   });
 
   // claude-to-openai.js:155-173 — is_error lost

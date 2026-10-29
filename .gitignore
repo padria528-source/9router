@@ -127,3 +127,5 @@ debug.log
 # Local sensitive / temp files
 Untitled*
 /public/sql-wasm.wasm
+.scratch/
+

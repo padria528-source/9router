@@ -1,9 +1,21 @@
 import { ensureDirs, DATA_FILE } from "./paths.js";
 import { stripNullBytes } from "./helpers/nullBytes.js";
 
+const RETRY_COOLDOWN_MS = 2000;
+
 // Use global to survive Next.js dev hot-reload (module state resets on reload)
-if (!global._dbAdapter) global._dbAdapter = { instance: null, initPromise: null, logged: false };
-const state = global._dbAdapter;
+function getState() {
+  if (!global._dbAdapter) {
+    global._dbAdapter = {
+      instance: null,
+      initPromise: null,
+      initError: null,
+      lastFailedAt: null,
+      logged: false,
+    };
+  }
+  return global._dbAdapter;
+}
 
 async function tryBunSqlite() {
   // Bun runtime only — built-in, no install needed
@@ -59,17 +71,6 @@ async function trySqlJs() {
 
 /**
  * Make every bound string NUL-safe, once, for all drivers.
- *
- * SQLite stores TEXT as a NUL-terminated C string, so a bound string with an
- * embedded NUL is rejected by better-sqlite3 ("String contains null byte") and
- * silently truncated by node:sqlite. Values that carry raw bytes — a model id
- * or endpoint from the request, tool output, a diff — can contain one, and the
- * write then either aborts the flush worker or loses the tail without a
- * trace. Sanitising at the binding boundary covers every driver and every
- * column type with a single rule, instead of one call site at a time.
- *
- * @param {object} adapter
- * @returns {object} adapter with NUL-safe run/get/all
  */
 function withNullByteSafeParams(adapter) {
   const clean = (params) => (Array.isArray(params) ? params.map(stripNullBytes) : params);
@@ -79,6 +80,18 @@ function withNullByteSafeParams(adapter) {
     get: (sql, params = []) => adapter.get(sql, clean(params)),
     all: (sql, params = []) => adapter.all(sql, clean(params)),
   };
+}
+
+async function createLocalAdapter() {
+  // Order per runtime:
+  //   Bun:  bun:sqlite → sql.js
+  //   Node: better-sqlite3 → node:sqlite (≥22.5) → sql.js
+  let adapter = await tryBunSqlite();
+  if (!adapter) adapter = await tryBetterSqlite();
+  if (!adapter) adapter = await tryNodeSqlite();
+  if (!adapter) adapter = await trySqlJs();
+  if (!adapter) throw new Error("[DB] No SQLite driver available (bun/better/node/sql.js all failed)");
+  return withNullByteSafeParams(adapter);
 }
 
 async function maybeWrapWithTurso(localAdapter) {
@@ -96,23 +109,16 @@ async function maybeWrapWithTurso(localAdapter) {
 
 async function initAdapter() {
   ensureDirs();
-  // Order per runtime:
-  //   Bun:  bun:sqlite → sql.js
-  //   Node: better-sqlite3 → node:sqlite (≥22.5) → sql.js
-  let adapter = await tryBunSqlite();
-  if (!adapter) adapter = await tryBetterSqlite();
-  if (!adapter) adapter = await tryNodeSqlite();
-  if (!adapter) adapter = await trySqlJs();
-  if (!adapter) throw new Error("[DB] No SQLite driver available (bun/better/node/sql.js all failed)");
 
-  adapter = withNullByteSafeParams(adapter);
+  // Migrations stay on the synchronous local SQLite adapter.
+  const localAdapter = await createLocalAdapter();
 
   const { runMigrationOnce } = await import("./migrate.js");
-  await runMigrationOnce(adapter);
+  await runMigrationOnce(localAdapter);
 
-  const localAdapter = adapter;
-  adapter = await maybeWrapWithTurso(localAdapter);
+  const adapter = await maybeWrapWithTurso(localAdapter);
 
+  const state = getState();
   if (!state.logged) {
     const suffix = adapter.driver === "turso-mirror"
       ? ` | local: ${localAdapter.driver} | remote persistence: Turso`
@@ -125,14 +131,56 @@ async function initAdapter() {
 }
 
 export async function getAdapter() {
+  const state = getState();
   if (state.instance) return state.instance;
-  if (!state.initPromise) state.initPromise = initAdapter().then((a) => { state.instance = a; return a; });
+  if (state.initPromise) return state.initPromise;
+
+  // Enforce cooldown backoff so failures do not spin in tight retry loops
+  const now = Date.now();
+  if (state.initError && state.lastFailedAt && (now - state.lastFailedAt) < RETRY_COOLDOWN_MS) {
+    throw state.initError;
+  }
+
+  state.initPromise = initAdapter()
+    .then((a) => {
+      state.instance = a;
+      state.initError = null;
+      state.lastFailedAt = null;
+      return a;
+    })
+    .catch((err) => {
+      state.initError = err;
+      state.lastFailedAt = Date.now();
+      state.initPromise = null;
+      throw err;
+    });
+
   return state.initPromise;
 }
 
 export const getDb = getAdapter;
 
+export function getDatabaseStatus() {
+  const state = getState();
+  if (state.instance) {
+    try {
+      state.instance.get("SELECT 1 AS ok");
+      return { ready: true, status: "ready" };
+    } catch {
+      return { ready: false, status: "error" };
+    }
+  }
+  if (state.initPromise) {
+    return { ready: false, status: "initializing" };
+  }
+  if (state.initError) {
+    return { ready: false, status: "failed" };
+  }
+  return { ready: false, status: "uninitialized" };
+}
+
 export function getAdapterSync() {
+  const state = getState();
   if (!state.instance) throw new Error("[DB] adapter not initialized — await getAdapter() first");
   return state.instance;
 }

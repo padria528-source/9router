@@ -127,7 +127,6 @@ export async function POST(request) {
     if (!existing.providers) existing.providers = {};
     const existingProvider = existing.providers["9router"] || {};
 
-    const existingProvider = existing.providers["9router"] || {};
     const prevModels = new Map(
       (Array.isArray(existingProvider.models) ? existingProvider.models : [])
         .map((m) => (typeof m === "string" ? { id: m } : m))
